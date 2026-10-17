@@ -22,6 +22,7 @@ jobs:
           cp main.dart app/lib/main.dart
           cp AndroidManifest.xml app/android/app/src/main/AndroidManifest.xml
           sed -i 's/flutter.minSdkVersion/24/g' app/android/app/build.gradle.kts
+          sed -i 's/flutter.compileSdkVersion/37/g' app/android/app/build.gradle.kts
           
       - name: Build APK
         run: |

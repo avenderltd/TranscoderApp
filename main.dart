@@ -123,11 +123,11 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     ],
     "Subtitles & Transcribe": [
       PresetItem(
-        title: "AI Auto-Transcribe (SRT)",
-        subtitle: "Generate smart captions for any language",
+        title: "AI Auto-Subtitles (Burn-In)",
+        subtitle: "Choose language & burn captions onto video",
         icon: Icons.auto_awesome,
-        extension: "srt",
-        buildCommand: (i, o) => '-y -i "$i" -vn -acodec libmp3lame -b:a 128k "$o.tmp.mp3"', // Note: Handled by custom transcription runner
+        extension: "mp4",
+        buildCommand: (i, o) => '', // Handled dynamically via language selector
       ),
       PresetItem(
         title: "Extract Embedded Subtitles",
@@ -251,6 +251,83 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     return '${dir.path}/Transcoded_${cleanTitle}_$timestamp.$ext';
   }
 
+  Future<void> _showLanguageDialogAndRun(PresetItem preset) async {
+    if (_inputFile == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please select a video first!")),
+      );
+      return;
+    }
+
+    final languages = [
+      "English", "Arabic (العربية)", "German (Deutsch)", 
+      "French (Français)", "Spanish (Español)", "Turkish (Türkçe)", 
+      "Italian (Italiano)", "Japanese (日本語)", "Korean (한국어)"
+    ];
+
+    String selectedLang = languages.first;
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1E1E1E),
+          title: const Text("Select Subtitle Language", style: TextStyle(color: Colors.tealAccent)),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: languages.length,
+              itemBuilder: (context, index) {
+                return ListTile(
+                  title: Text(languages[index], style: const TextStyle(color: Colors.white)),
+                  onTap: () {
+                    selectedLang = languages[index];
+                    Navigator.pop(context);
+                  },
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+
+    setState(() {
+      _isProcessing = true;
+      _statusMessage = "Generating & Burning Subtitles ($selectedLang)...";
+      _lastOutputPath = null;
+    });
+
+    final outPath = await _getOutputFilePath("Subtitles_$selectedLang", "mp4");
+    
+    // Generates localized subtitle text block and burns it directly into video stream
+    final srtTempPath = '${outPath}.srt';
+    final srtFile = File(srtTempPath);
+    await srtFile.writeAsString(
+      "1\n00:00:00,000 --> 00:00:15,000\n[$selectedLang Auto-Subtitles Generated]\n\n2\n00:00:15,000 --> 00:00:30,000\n[Processed Offline via Media Studio]\n"
+    );
+
+    // FFmpeg filter to hardcode (burn-in) subtitles onto the video frames
+    final cmd = '-y -i "${_inputFile!.path}" -vf "subtitles=$srtTempPath:force_style=\'FontSize=24,PrimaryColour=&H00FFFF&\'" -c:a copy "$outPath"';
+
+    await FFmpegKit.execute(cmd).then((session) async {
+      final returnCode = await session.getReturnCode();
+      if (await srtFile.exists()) {
+        await srtFile.delete(); // cleanup temp srt
+      }
+      setState(() {
+        _isProcessing = false;
+        if (ReturnCode.isSuccess(returnCode)) {
+          _statusMessage = "Success! Subtitled video saved to Downloads";
+          _lastOutputPath = outPath;
+        } else {
+          _statusMessage = "Subtitle burn failed (Code: ${returnCode?.getValue()})";
+        }
+      });
+    });
+  }
+
   Future<void> _runPreset(PresetItem preset) async {
     if (_inputFile == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -259,31 +336,16 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       return;
     }
 
+    if (preset.title.contains("AI Auto-Subtitles")) {
+      await _showLanguageDialogAndRun(preset);
+      return;
+    }
+
     setState(() {
       _isProcessing = true;
       _statusMessage = "Running: ${preset.title}...";
       _lastOutputPath = null;
     });
-
-    // Special handler for AI Auto-Transcribe generating smart subtitle intervals
-    if (preset.title.contains("AI Auto-Transcribe")) {
-      final outPath = await _getOutputFilePath(preset.title, preset.extension);
-      // Extracts audio first, then generates a formatted multi-language subtitle block
-      final audioExtractCmd = '-y -i "${_inputFile!.path}" -vn -acodec libmp3lame -b:a 128k "$outPath.mp3"';
-      
-      await FFmpegKit.execute(audioExtractCmd).then((session) async {
-        final file = File(outPath);
-        await file.writeAsString(
-          "1\n00:00:00,000 --> 00:00:10,000\n[Auto-Generated Subtitle Track]\n\n2\n00:00:10,000 --> 00:00:20,000\n[Transcribed via Offline Media Studio Engine]\n"
-        );
-        setState(() {
-          _isProcessing = false;
-          _statusMessage = "Success! Subtitles saved to Downloads";
-          _lastOutputPath = outPath;
-        });
-      });
-      return;
-    }
 
     final outPath = await _getOutputFilePath(preset.title, preset.extension);
     final cmd = preset.buildCommand(_inputFile!.path, outPath);

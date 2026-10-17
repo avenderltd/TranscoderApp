@@ -1,0 +1,15 @@
+name: transcoder_app
+description: A frictionless media transcoder.
+publish_to: 'none'
+version: 1.0.0+1
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  ffmpeg_kit_flutter_min_gpl: ^6.0.3
+  receive_sharing_intent: ^1.5.0
+  path_provider: ^2.1.1
+  file_picker: ^6.1.1
+flutter:
+  uses-material-design: true

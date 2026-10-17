@@ -1,0 +1,35 @@
+name: Build Android APK
+on:
+  push:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+      
+      - name: Create Base Flutter App & Inject Code
+        run: |
+          flutter create app
+          cp pubspec.yaml app/pubspec.yaml
+          cp main.dart app/lib/main.dart
+          cp AndroidManifest.xml app/android/app/src/main/AndroidManifest.xml
+          
+      - name: Build APK
+        run: |
+          cd app
+          flutter pub get
+          flutter build apk --release --split-per-abi
+          
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-apks
+          path: app/build/app/outputs/flutter-apk/app-*-release.apk

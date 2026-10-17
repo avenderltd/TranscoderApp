@@ -28,7 +28,6 @@ jobs:
         run: |
           cd app
           flutter pub get
-          echo 'android { namespace "com.arthenica.ffmpegkit.flutter" }' >> /home/runner/.pub-cache/hosted/pub.dev/ffmpeg_kit_flutter_min_gpl-5.1.0/android/build.gradle
           flutter build apk --release --split-per-abi
           
       - name: Upload APKs

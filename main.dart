@@ -45,10 +45,10 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   }
 
   void _setupShareIntent() {
-    _intentSub = ReceiveSharingIntent.getMediaStream().listen((value) {
+    _intentSub = ReceiveSharingIntent.instance.getMediaStream().listen((value) {
       if (value.isNotEmpty) setState(() => _inputFile = File(value.first.path));
     });
-    ReceiveSharingIntent.getInitialMedia().then((value) {
+    ReceiveSharingIntent.instance.getInitialMedia().then((value) {
       if (value.isNotEmpty) setState(() => _inputFile = File(value.first.path));
     });
   }

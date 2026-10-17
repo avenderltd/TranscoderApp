@@ -15,14 +15,35 @@ class TranscoderApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Frictionless Transcoder',
+      title: 'Pro Media Studio',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: const Color(0xFF121212),
-        colorScheme: const ColorScheme.dark(primary: Colors.tealAccent),
+        colorScheme: const ColorScheme.dark(
+          primary: Colors.tealAccent,
+          secondary: Colors.teal,
+          surface: Color(0xFF1E1E1E),
+        ),
       ),
       home: const TranscoderScreen(),
     );
   }
+}
+
+class PresetItem {
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final String extension;
+  final String Function(String input, String output) buildCommand;
+
+  PresetItem({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.extension,
+    required this.buildCommand,
+  });
 }
 
 class TranscoderScreen extends StatefulWidget {
@@ -36,7 +57,138 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   late StreamSubscription _intentSub;
   File? _inputFile;
   bool _isProcessing = false;
-  String _statusMessage = "Ready";
+  String _statusMessage = "Select a media file to begin";
+  String? _lastOutputPath;
+
+  final Map<String, List<PresetItem>> _categories = {
+    "Resolution & Quality": [
+      PresetItem(
+        title: "4K Ultra HD",
+        subtitle: "3840x2160 • High Bitrate MP4",
+        icon: Icons.four_k_outlined,
+        extension: "mp4",
+        buildCommand: (i, o) => '-y -i "$i" -vf "scale=3840:-2" -c:v libx264 -preset fast -crf 18 -c:a aac -b:a 192k "$o"',
+      ),
+      PresetItem(
+        title: "1080p Full HD",
+        subtitle: "1920x1080 • Crisp Standard HD",
+        icon: Icons.hd_outlined,
+        extension: "mp4",
+        buildCommand: (i, o) => '-y -i "$i" -vf "scale=1920:-2" -c:v libx264 -preset fast -crf 21 -c:a aac -b:a 160k "$o"',
+      ),
+      PresetItem(
+        title: "720p HD Ready",
+        subtitle: "1280x720 • Balanced Size & Quality",
+        icon: Icons.sd_outlined,
+        extension: "mp4",
+        buildCommand: (i, o) => '-y -i "$i" -vf "scale=1280:-2" -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k "$o"',
+      ),
+      PresetItem(
+        title: "Small Share Size",
+        subtitle: "480p • Best for Discord & WhatsApp",
+        icon: Icons.compress,
+        extension: "mp4",
+        buildCommand: (i, o) => '-y -i "$i" -vf "scale=854:-2" -c:v libx264 -preset veryfast -crf 28 -c:a aac -b:a 96k "$o"',
+      ),
+    ],
+    "Speed, FPS & GIF": [
+      PresetItem(
+        title: "Smooth 60 FPS",
+        subtitle: "Convert framerate to 60fps",
+        icon: Icons.speed,
+        extension: "mp4",
+        buildCommand: (i, o) => '-y -i "$i" -r 60 -c:v libx264 -preset fast -crf 22 -c:a copy "$o"',
+      ),
+      PresetItem(
+        title: "2x Fast Forward",
+        subtitle: "Double video & audio speed",
+        icon: Icons.fast_forward_outlined,
+        extension: "mp4",
+        buildCommand: (i, o) => '-y -i "$i" -filter_complex "[0:v]setpts=0.5*PTS[v];[0:a]atempo=2.0[a]" -map "[v]" -map "[a]" -c:v libx264 -preset fast "$o"',
+      ),
+      PresetItem(
+        title: "0.5x Slow Motion",
+        subtitle: "Half speed smooth playback",
+        icon: Icons.slow_motion_video,
+        extension: "mp4",
+        buildCommand: (i, o) => '-y -i "$i" -filter_complex "[0:v]setpts=2.0*PTS[v];[0:a]atempo=0.5[a]" -map "[v]" -map "[a]" -c:v libx264 -preset fast "$o"',
+      ),
+      PresetItem(
+        title: "High-Quality GIF",
+        subtitle: "480px • 15 FPS Animated GIF",
+        icon: Icons.gif_box_outlined,
+        extension: "gif",
+        buildCommand: (i, o) => '-y -i "$i" -vf "fps=15,scale=480:-1:flags=lanczos" "$o"',
+      ),
+    ],
+    "Subtitles & Transcribe": [
+      PresetItem(
+        title: "Extract Subtitles (.srt)",
+        subtitle: "Extract embedded subtitle text track",
+        icon: Icons.subtitles_outlined,
+        extension: "srt",
+        buildCommand: (i, o) => '-y -i "$i" -map 0:s:0 "$o"',
+      ),
+      PresetItem(
+        title: "Extract Subtitles (.vtt)",
+        subtitle: "WebVTT subtitle format export",
+        icon: Icons.closed_caption_outlined,
+        extension: "vtt",
+        buildCommand: (i, o) => '-y -i "$i" -map 0:s:0 "$o"',
+      ),
+      PresetItem(
+        title: "Strip Subtitles (Clean Video)",
+        subtitle: "Remove hardcoded/soft subtitle tracks",
+        icon: Icons.leak_remove_outlined,
+        extension: "mp4",
+        buildCommand: (i, o) => '-y -i "$i" -c:v copy -c:a copy -sn "$o"',
+      ),
+    ],
+    "Audio & Formats": [
+      PresetItem(
+        title: "Extract MP3 Audio",
+        subtitle: "320kbps High-Bitrate MP3",
+        icon: Icons.audiotrack_outlined,
+        extension: "mp3",
+        buildCommand: (i, o) => '-y -i "$i" -vn -acodec libmp3lame -b:a 320k "$o"',
+      ),
+      PresetItem(
+        title: "Extract WAV Audio",
+        subtitle: "Uncompressed Lossless Audio",
+        icon: Icons.graphic_eq,
+        extension: "wav",
+        buildCommand: (i, o) => '-y -i "$i" -vn "$o"',
+      ),
+      PresetItem(
+        title: "Mute Video",
+        subtitle: "Remove audio track completely",
+        icon: Icons.volume_off_outlined,
+        extension: "mp4",
+        buildCommand: (i, o) => '-y -i "$i" -c:v copy -an "$o"',
+      ),
+      PresetItem(
+        title: "Boost Volume 200%",
+        subtitle: "Fix quiet audio in videos",
+        icon: Icons.volume_up_outlined,
+        extension: "mp4",
+        buildCommand: (i, o) => '-y -i "$i" -vcodec copy -af "volume=2.0" "$o"',
+      ),
+      PresetItem(
+        title: "Remux to MKV",
+        subtitle: "Instant container swap (Lossless)",
+        icon: Icons.video_file_outlined,
+        extension: "mkv",
+        buildCommand: (i, o) => '-y -i "$i" -c copy "$o"',
+      ),
+      PresetItem(
+        title: "Remux to MOV",
+        subtitle: "Apple QuickTime format",
+        icon: Icons.movie_creation_outlined,
+        extension: "mov",
+        buildCommand: (i, o) => '-y -i "$i" -c copy "$o"',
+      ),
+    ],
+  };
 
   @override
   void initState() {
@@ -46,10 +198,21 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
   void _setupShareIntent() {
     _intentSub = ReceiveSharingIntent.instance.getMediaStream().listen((value) {
-      if (value.isNotEmpty) setState(() => _inputFile = File(value.first.path));
+      if (value.isNotEmpty) {
+        setState(() {
+          _inputFile = File(value.first.path);
+          _statusMessage = "Loaded from Share Menu";
+        });
+      }
     });
+
     ReceiveSharingIntent.instance.getInitialMedia().then((value) {
-      if (value.isNotEmpty) setState(() => _inputFile = File(value.first.path));
+      if (value.isNotEmpty) {
+        setState(() {
+          _inputFile = File(value.first.path);
+          _statusMessage = "Loaded from Share Menu";
+        });
+      }
     });
   }
 
@@ -61,40 +224,52 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
   Future<void> _pickFile() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.media);
-    if (result != null) setState(() => _inputFile = File(result.files.single.path!));
+    if (result != null && result.files.single.path != null) {
+      setState(() {
+        _inputFile = File(result.files.single.path!);
+        _statusMessage = "Ready to transcode";
+        _lastOutputPath = null;
+      });
+    }
   }
 
-  Future<void> _processMedia(String preset) async {
-    if (_inputFile == null) return;
-    setState(() {
-      _isProcessing = true;
-      _statusMessage = "Processing locally on device...";
-    });
-
+  Future<String> _getOutputFilePath(String presetTitle, String ext) async {
+    final cleanTitle = presetTitle.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final downloadDir = Directory('/storage/emulated/0/Download');
+    if (await downloadDir.exists()) {
+      return '${downloadDir.path}/Transcoded_${cleanTitle}_$timestamp.$ext';
+    }
     final dir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
-    final time = DateTime.now().millisecondsSinceEpoch;
-    String out = '';
-    String cmd = '';
+    return '${dir.path}/Transcoded_${cleanTitle}_$timestamp.$ext';
+  }
 
-    if (preset == "compress") {
-      out = '${dir.path}/compressed_$time.mp4';
-      cmd = '-i "${_inputFile!.path}" -vcodec libx264 -crf 28 -preset fast -c:a aac -b:a 128k "$out"';
-    } else if (preset == "gif") {
-      out = '${dir.path}/animation_$time.gif';
-      cmd = '-i "${_inputFile!.path}" -vf "fps=15,scale=480:-1:flags=lanczos" -loop 0 "$out"';
-    } else if (preset == "audio") {
-      out = '${dir.path}/extracted_$time.mp3';
-      cmd = '-i "${_inputFile!.path}" -q:a 0 -map a "$out"';
+  Future<void> _runPreset(PresetItem preset) async {
+    if (_inputFile == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please select a video first!")),
+      );
+      return;
     }
 
-    await FFmpegKit.executeAsync(cmd, (session) async {
-      final code = await session.getReturnCode();
+    setState(() {
+      _isProcessing = true;
+      _statusMessage = "Running: ${preset.title}...";
+      _lastOutputPath = null;
+    });
+
+    final outPath = await _getOutputFilePath(preset.title, preset.extension);
+    final cmd = preset.buildCommand(_inputFile!.path, outPath);
+
+    await FFmpegKit.execute(cmd).then((session) async {
+      final returnCode = await session.getReturnCode();
       setState(() {
         _isProcessing = false;
-        if (ReturnCode.isSuccess(code)) {
-          _statusMessage = "Done! Saved to:\n$out";
+        if (ReturnCode.isSuccess(returnCode)) {
+          _statusMessage = "Success! Saved to Downloads";
+          _lastOutputPath = outPath;
         } else {
-          _statusMessage = "Failed. Try a different file.";
+          _statusMessage = "Conversion failed (Code: ${returnCode?.getValue()})";
         }
       });
     });
@@ -102,59 +277,140 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Convert Media'), backgroundColor: Colors.transparent, elevation: 0),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    final fileName = _inputFile?.path.split('/').last ?? "Tap to Pick Media File";
+
+    return DefaultTabController(
+      length: _categories.keys.length,
+      child: Scaffold(
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF181818),
+          elevation: 0,
+          title: const Text("Pro Media Studio", style: TextStyle(fontWeight: FontWeight.bold)),
+          bottom: TabBar(
+            isScrollable: true,
+            indicatorColor: Colors.tealAccent,
+            labelColor: Colors.tealAccent,
+            unselectedLabelColor: Colors.white60,
+            tabs: _categories.keys.map((cat) => Tab(text: cat)).toList(),
+          ),
+        ),
+        body: Column(
           children: [
+            // File Selection Header Card
             GestureDetector(
               onTap: _isProcessing ? null : _pickFile,
               child: Container(
-                height: 150,
+                width: double.infinity,
+                margin: const EdgeInsets.all(16),
+                padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 16),
                 decoration: BoxDecoration(
                   color: const Color(0xFF1E1E1E),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.tealAccent, width: 2),
-                ),
-                child: Center(
-                  child: Text(
-                    _inputFile == null ? 'Tap to select file\nor share from gallery' : 'Selected:\n${_inputFile!.path.split('/').last}',
-                    textAlign: TextAlign.center,
+                  border: Border.all(
+                    color: _inputFile != null ? Colors.tealAccent : Colors.white24,
+                    width: 1.8,
                   ),
+                ),
+                child: Column(
+                  children: [
+                    const Icon(
+                      Icons.upload_file_outlined,
+                      color: Colors.tealAccent,
+                      size: 34,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _inputFile != null ? "Selected File:" : "No File Selected",
+                      style: const TextStyle(color: Colors.white60, fontSize: 13),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      fileName,
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                  ],
                 ),
               ),
             ),
-            const SizedBox(height: 32),
-            if (_isProcessing) ...[
-              const Center(child: CircularProgressIndicator(color: Colors.tealAccent)),
-              const SizedBox(height: 16),
-              Text(_statusMessage, textAlign: TextAlign.center),
-            ] else if (_inputFile != null) ...[
-              ElevatedButton.icon(
-                onPressed: () => _processMedia("compress"),
-                icon: const Icon(Icons.compress),
-                label: const Text('Compress for Sharing'),
-                style: ElevatedButton.styleFrom(padding: const EdgeInsets.all(16)),
+
+            // Status Banner
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF181818),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        if (_isProcessing) ...[
+                          const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.tealAccent),
+                          ),
+                          const SizedBox(width: 12),
+                        ],
+                        Flexible(
+                          child: Text(
+                            _statusMessage,
+                            style: const TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_lastOutputPath != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        _lastOutputPath!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.white54, fontSize: 11),
+                      ),
+                    ],
+                  ],
+                ),
               ),
-              const SizedBox(height: 12),
-              ElevatedButton.icon(
-                onPressed: () => _processMedia("gif"),
-                icon: const Icon(Icons.gif_box),
-                label: const Text('Turn into GIF'),
-                style: ElevatedButton.styleFrom(padding: const EdgeInsets.all(16)),
+            ),
+            const SizedBox(height: 8),
+
+            // Tabbed Grid of Presets
+            Expanded(
+              child: TabBarView(
+                children: _categories.values.map((presets) {
+                  return ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    itemCount: presets.length,
+                    itemBuilder: (context, index) {
+                      final p = presets[index];
+                      return Card(
+                        color: const Color(0xFF1E1E1E),
+                        margin: const EdgeInsets.only(bottom: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        child: ListTile(
+                          enabled: !_isProcessing,
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.tealAccent.withOpacity(0.12),
+                            child: Icon(p.icon, color: Colors.tealAccent),
+                          ),
+                          title: Text(p.title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text(p.subtitle, style: const TextStyle(color: Colors.white60, fontSize: 12)),
+                          trailing: const Icon(Icons.play_arrow_rounded, color: Colors.tealAccent),
+                          onTap: () => _runPreset(p),
+                        ),
+                      );
+                    },
+                  );
+                }).toList(),
               ),
-              const SizedBox(height: 12),
-              ElevatedButton.icon(
-                onPressed: () => _processMedia("audio"),
-                icon: const Icon(Icons.audio_file),
-                label: const Text('Extract Audio (MP3)'),
-                style: ElevatedButton.styleFrom(padding: const EdgeInsets.all(16)),
-              ),
-              const SizedBox(height: 24),
-              Text(_statusMessage, textAlign: TextAlign.center, style: const TextStyle(color: Colors.tealAccent)),
-            ]
+            ),
           ],
         ),
       ),

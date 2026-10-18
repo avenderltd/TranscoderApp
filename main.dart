@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit_config.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
@@ -62,9 +64,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   String _statusMessage = "Select a media file to begin";
   String? _lastOutputPath;
 
-  // All 99 Official Whisper AI Supported World Languages + Auto-Detect
+  // All 99 Official Whisper AI Supported World Languages + Same-as-Audio option
   final Map<String, String> _worldLanguages = {
-    "Auto-Detect Language": "auto",
+    "Same as Video Audio (No Translation)": "same",
     "English": "en",
     "Arabic (العربية)": "ar",
     "German (Deutsch)": "de",
@@ -72,7 +74,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     "Spanish (Español)": "es",
     "Turkish (Türkçe)": "tr",
     "Russian (Русский)": "ru",
-    "Chinese (中文)": "zh",
+    "Chinese (中文)": "zh-CN",
     "Hindi (हिन्दी)": "hi",
     "Urdu (اردو)": "ur",
     "Portuguese (Português)": "pt",
@@ -94,7 +96,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     "Danish (Dansk)": "da",
     "Finnish (Suomi)": "fi",
     "Norwegian (Norsk)": "no",
-    "Hebrew (עברית)": "he",
+    "Hebrew (עברית)": "iw",
     "Malay (Bahasa Melayu)": "ms",
     "Tagalog / Filipino": "tl",
     "Swahili (Kiswahili)": "sw",
@@ -230,14 +232,14 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     "Subtitles & Transcribe": [
       PresetItem(
         title: "AI Auto-Subtitles (Burn-In)",
-        subtitle: "100% Free On-Device Whisper AI • 99 Languages",
+        subtitle: "Transcribe speech & auto-translate into 99 languages",
         icon: Icons.auto_awesome,
         extension: "mp4",
         buildCommand: (i, o) => '',
       ),
       PresetItem(
         title: "AI Auto-Transcribe (.SRT File Only)",
-        subtitle: "Generate & save .srt file offline with Whisper AI",
+        subtitle: "Generate & translate .srt file in 99 languages",
         icon: Icons.description_outlined,
         extension: "srt",
         buildCommand: (i, o) => '',
@@ -380,11 +382,31 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     return '$hrs:$mins:$secs,$ms';
   }
 
-  Future<Map<String, dynamic>?> _showSearchableLanguageDialog() async {
-    String searchQuery = "";
-    bool translateToEnglish = false;
+  // Free keyless translation helper so ANY spoken language can be translated into ANY subtitle language
+  Future<String> _translateTextFree(String text, String targetLang) async {
+    if (targetLang == "same" || text.trim().isEmpty) return text;
+    try {
+      final url = Uri.parse(
+        'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=$targetLang&dt=t&q=${Uri.encodeComponent(text)}',
+      );
+      final response = await http.get(url);
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+        final List sentences = decoded[0];
+        final StringBuffer translated = StringBuffer();
+        for (final s in sentences) {
+          if (s[0] != null) translated.write(s[0]);
+        }
+        return translated.toString().trim();
+      }
+    } catch (_) {}
+    return text;
+  }
 
-    return await showDialog<Map<String, dynamic>>(
+  Future<String?> _showSearchableLanguageDialog() async {
+    String searchQuery = "";
+
+    return await showDialog<String>(
       context: context,
       builder: (context) {
         return StatefulBuilder(
@@ -395,10 +417,10 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
             return AlertDialog(
               backgroundColor: const Color(0xFF1E1E1E),
-              title: const Text("Select Audio Language", style: TextStyle(color: Colors.tealAccent)),
+              title: const Text("Select Target Subtitle Language", style: TextStyle(color: Colors.tealAccent)),
               content: SizedBox(
                 width: double.maxFinite,
-                height: 420,
+                height: 400,
                 child: Column(
                   children: [
                     TextField(
@@ -413,15 +435,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                       ),
                       onChanged: (val) => setModalState(() => searchQuery = val),
                     ),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      activeColor: Colors.tealAccent,
-                      title: const Text("Translate to English", style: TextStyle(color: Colors.white, fontSize: 13)),
-                      subtitle: const Text("Convert foreign speech into English subtitles", style: TextStyle(color: Colors.white54, fontSize: 11)),
-                      value: translateToEnglish,
-                      onChanged: (val) => setModalState(() => translateToEnglish = val),
-                    ),
-                    const Divider(color: Colors.white24),
+                    const SizedBox(height: 10),
                     Expanded(
                       child: ListView.builder(
                         itemCount: filteredEntries.length,
@@ -430,10 +444,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                           return ListTile(
                             title: Text(entry.key, style: const TextStyle(color: Colors.white)),
                             trailing: Text(entry.value.toUpperCase(), style: const TextStyle(color: Colors.white38, fontSize: 12)),
-                            onTap: () => Navigator.pop(context, {
-                              'lang': entry.value,
-                              'translate': translateToEnglish,
-                            }),
+                            onTap: () => Navigator.pop(context, entry.value),
                           );
                         },
                       ),
@@ -466,7 +477,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     await File(srtResult.files.single.path!).copy(safeSrtFile.path);
 
     final outPath = await _getOutputFilePath("Burned_Subs", "mp4");
-    final cmd = '-y -i "${_inputFile!.path}" -vf "subtitles=${safeSrtFile.path}:fontsdir=/system/fonts:force_style=\'FontSize=20,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -c:a copy "$outPath"';
+    final cmd = '-y -i "${_inputFile!.path}" -vf "subtitles=${safeSrtFile.path}:fontsdir=/system/fonts:force_style=\'FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -c:a copy "$outPath"';
 
     await FFmpegKit.execute(cmd).then((session) async {
       final returnCode = await session.getReturnCode();
@@ -483,15 +494,12 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   }
 
   Future<void> _handleOfflineWhisperSubtitles({required bool burnIntoVideo}) async {
-    final choice = await _showSearchableLanguageDialog();
-    if (choice == null) return;
-
-    final String selectedLangCode = choice['lang'];
-    final bool translateToEnglish = choice['translate'];
+    final targetLangCode = await _showSearchableLanguageDialog();
+    if (targetLangCode == null) return;
 
     setState(() {
       _isProcessing = true;
-      _statusMessage = "Step 1/3: Converting audio to 16kHz WAV for Whisper...";
+      _statusMessage = "Step 1/4: Extracting 16kHz speech audio...";
       _lastOutputPath = null;
     });
 
@@ -511,7 +519,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       }
 
       setState(() {
-        _statusMessage = "Step 2/3: Running Offline Whisper AI (1st run downloads ~140MB model)...";
+        _statusMessage = "Step 2/4: Transcribing true speech with Offline Whisper AI...";
       });
 
       final whisper = Whisper(
@@ -519,11 +527,12 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         downloadHost: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main",
       );
 
+      // CRITICAL FIX: Always use language: "auto" so Whisper accurately transcribes the actual spoken language in the video instead of hallucinating!
       final res = await whisper.transcribe(
         transcribeRequest: TranscribeRequest(
           audio: tempWavPath,
-          language: selectedLangCode,
-          isTranslate: translateToEnglish,
+          language: "auto",
+          isTranslate: false,
           isNoTimestamps: false,
           splitOnWord: false,
         ),
@@ -533,17 +542,29 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       final StringBuffer srtBuffer = StringBuffer();
 
       if (segments != null && segments.isNotEmpty) {
+        setState(() {
+          _statusMessage = targetLangCode == "same"
+              ? "Step 3/4: Formatting subtitle timestamps..."
+              : "Step 3/4: Translating ${segments.length} subtitle lines to ${targetLangCode.toUpperCase()}...";
+        });
+
         for (int i = 0; i < segments.length; i++) {
           final seg = segments[i];
+          final originalText = seg.text.trim();
+          if (originalText.isEmpty) continue;
+
+          final finalLine = await _translateTextFree(originalText, targetLangCode);
+
           srtBuffer.writeln('${i + 1}');
           srtBuffer.writeln('${_formatDurationToSrt(seg.fromTs)} --> ${_formatDurationToSrt(seg.toTs)}');
-          srtBuffer.writeln(seg.text.trim());
+          srtBuffer.writeln(finalLine);
           srtBuffer.writeln();
         }
       } else if (res.text.trim().isNotEmpty) {
+        final finalLine = await _translateTextFree(res.text.trim(), targetLangCode);
         srtBuffer.writeln('1');
         srtBuffer.writeln('00:00:00,000 --> 00:05:00,000');
-        srtBuffer.writeln(res.text.trim());
+        srtBuffer.writeln(finalLine);
         srtBuffer.writeln();
       } else {
         setState(() {
@@ -556,20 +577,20 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       await File(tempSrtPath).writeAsString(srtBuffer.toString());
 
       if (!burnIntoVideo) {
-        final outSrtPath = await _getOutputFilePath("Whisper_Subtitles_$selectedLangCode", "srt");
+        final outSrtPath = await _getOutputFilePath("Whisper_Subtitles_$targetLangCode", "srt");
         await File(tempSrtPath).copy(outSrtPath);
         setState(() {
           _isProcessing = false;
-          _statusMessage = "Success! Whisper .SRT saved to Downloads";
+          _statusMessage = "Success! Accurate .SRT saved to Downloads";
           _lastOutputPath = outSrtPath;
         });
         return;
       }
 
-      setState(() => _statusMessage = "Step 3/3: Burning Subtitles into Video...");
-      final outVideoPath = await _getOutputFilePath("Subtitled_$selectedLangCode", "mp4");
+      setState(() => _statusMessage = "Step 4/4: Burning Subtitles into Video...");
+      final outVideoPath = await _getOutputFilePath("Subtitled_$targetLangCode", "mp4");
 
-      final burnCmd = '-y -i "${_inputFile!.path}" -vf "subtitles=$tempSrtPath:fontsdir=/system/fonts:force_style=\'FontSize=20,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -c:a copy "$outVideoPath"';
+      final burnCmd = '-y -i "${_inputFile!.path}" -vf "subtitles=$tempSrtPath:fontsdir=/system/fonts:force_style=\'FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -c:a copy "$outVideoPath"';
 
       final burnSession = await FFmpegKit.execute(burnCmd);
       final burnCode = await burnSession.getReturnCode();

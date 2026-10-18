@@ -12,5 +12,6 @@ dependencies:
   receive_sharing_intent: ^1.8.0
   path_provider: ^2.1.4
   file_picker: ^8.1.2
+  http: ^1.2.2
 flutter:
   uses-material-design: true

@@ -26,6 +26,7 @@ jobs:
           
       - name: Build APK
         run: |
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
           cd app
           flutter pub get
           find /home/runner/.pub-cache/ -name "build.gradle*" -exec sed -i 's/compileSdkVersion [0-9][0-9]/compileSdkVersion 37/g; s/compileSdk [0-9][0-9]/compileSdk 37/g; s/compileSdk = [0-9][0-9]/compileSdk = 37/g' {} +

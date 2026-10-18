@@ -62,7 +62,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   String _statusMessage = "Select a media file to begin";
   String? _lastOutputPath;
 
-  // 70+ Whisper Supported World Languages
+  // All 99 Official Whisper AI Supported World Languages + Auto-Detect
   final Map<String, String> _worldLanguages = {
     "Auto-Detect Language": "auto",
     "English": "en",
@@ -108,32 +108,62 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     "Malayalam (മലയാളം)": "ml",
     "Nepali (नेपाली)": "ne",
     "Sinhala (සිංහල)": "si",
-    "Kurdish (Kurdî)": "ku",
+    "Assamese (অসমীয়া)": "as",
+    "Sindhi (سنڌي)": "sd",
+    "Sanskrit (संस्कृतम्)": "sa",
     "Pashto (پښتو)": "ps",
+    "Tajik (Тоҷикӣ)": "tg",
+    "Turkmen (Türkmençe)": "tk",
+    "Uzbek (Oʻzbek)": "uz",
+    "Kazakh (Қазақ тілі)": "kk",
+    "Tatar (Татарча)": "tt",
+    "Bashkir (Башҡортса)": "ba",
+    "Mongolian (Монгол)": "mn",
+    "Tibetan (བོད་ཡིག)": "bo",
+    "Myanmar / Burmese (မြန်မာ)": "my",
+    "Khmer (ខ្មែរ)": "km",
+    "Lao (ລາວ)": "lo",
+    "Javanese (Basa Jawa)": "jw",
+    "Sundanese (Basa Sunda)": "su",
+    "Maori (Māori)": "mi",
+    "Hawaiian (ʻŌlelo Hawaiʻi)": "haw",
     "Somali (Soomaali)": "so",
     "Amharic (አማርኛ)": "am",
     "Hausa": "ha",
     "Yoruba": "yo",
+    "Shona (ChiShona)": "sn",
+    "Lingala (Lingála)": "ln",
+    "Malagasy": "mg",
     "Afrikaans": "af",
     "Albanian (Shqip)": "sq",
     "Armenian (Հայերեն)": "hy",
     "Azerbaijani (Azərbaycan)": "az",
+    "Belarusian (Беларуская)": "be",
     "Bosnian (Bosanski)": "bs",
     "Bulgarian (Български)": "bg",
     "Catalan (Català)": "ca",
     "Croatian (Hrvatski)": "hr",
     "Estonian (Eesti)": "et",
+    "Faroese (Føroyskt)": "fo",
+    "Galician (Galego)": "gl",
     "Georgian (ქართული)": "ka",
     "Icelandic (Íslenska)": "is",
-    "Kazakh (Қазақ тілі)": "kk",
     "Latvian (Latviešu)": "lv",
     "Lithuanian (Lietuvių)": "lt",
+    "Luxembourgish (Lëtzebuergesch)": "lb",
     "Macedonian (Македонски)": "mk",
-    "Mongolian (Монгол)": "mn",
+    "Maltese (Malti)": "mt",
     "Serbian (Српски)": "sr",
     "Slovak (Slovenčina)": "sk",
     "Slovenian (Slovenščina)": "sl",
-    "Uzbek (Oʻzbek)": "uz",
+    "Welsh (Cymraeg)": "cy",
+    "Breton (Brezhoneg)": "br",
+    "Basque (Euskara)": "eu",
+    "Occitan": "oc",
+    "Latin (Latina)": "la",
+    "Yiddish (ייִדיש)": "yi",
+    "Haitian Creole (Kreyòl Ayisyen)": "ht",
+    "Cantonese (粵語)": "yue",
   };
 
   final Map<String, List<PresetItem>> _categories = {
@@ -200,7 +230,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     "Subtitles & Transcribe": [
       PresetItem(
         title: "AI Auto-Subtitles (Burn-In)",
-        subtitle: "100% Free On-Device Whisper AI • 70+ Languages",
+        subtitle: "100% Free On-Device Whisper AI • 99 Languages",
         icon: Icons.auto_awesome,
         extension: "mp4",
         buildCommand: (i, o) => '',
@@ -290,7 +320,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   @override
   void initState() {
     super.initState();
-    // Register Android system fonts so FFmpeg subtitle burning never fails with Code 1
     FFmpegKitConfig.setFontDirectoryList(["/system/fonts", "/system/font"], {});
     _setupShareIntent();
   }
@@ -375,7 +404,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                     TextField(
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
-                        hintText: "Search 70+ languages...",
+                        hintText: "Search 99 languages...",
                         hintStyle: const TextStyle(color: Colors.white38),
                         prefixIcon: const Icon(Icons.search, color: Colors.tealAccent),
                         filled: true,
@@ -471,7 +500,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       final tempWavPath = '${tempDir.path}/whisper_input.wav';
       final tempSrtPath = '${tempDir.path}/whisper_subs.srt';
 
-      // Whisper.cpp strictly requires 16kHz mono 16-bit PCM WAV
       final wavCmd = '-y -i "${_inputFile!.path}" -vn -ar 16000 -ac 1 -c:a pcm_s16le "$tempWavPath"';
       final wavSession = await FFmpegKit.execute(wavCmd);
       if (!ReturnCode.isSuccess(await wavSession.getReturnCode())) {
@@ -549,6 +577,55 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       setState(() {
         _isProcessing = false;
         if (ReturnCode.isSuccess(burnCode)) {
+          _statusMessage = "Success! Burned Video saved to Downloads";
+          _lastOutputPath = outVideoPath;
+        } else {
+          _statusMessage = "Subtitle burn failed (Code: ${burnCode?.getValue()})";
+        }
+      });
+    } catch (e) {
+      setState(() {
+        _isProcessing = false;
+        _statusMessage = "Whisper Error: $e";
+      });
+    }
+  }
+
+  Future<void> _runPreset(PresetItem preset) async {
+    if (_inputFile == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please select a video first!")),
+      );
+      return;
+    }
+
+    if (preset.title == "AI Auto-Subtitles (Burn-In)") {
+      await _handleOfflineWhisperSubtitles(burnIntoVideo: true);
+      return;
+    }
+    if (preset.title == "AI Auto-Transcribe (.SRT File Only)") {
+      await _handleOfflineWhisperSubtitles(burnIntoVideo: false);
+      return;
+    }
+    if (preset.title == "Burn External .SRT into Video") {
+      await _burnExternalSrt();
+      return;
+    }
+
+    setState(() {
+      _isProcessing = true;
+      _statusMessage = "Running: ${preset.title}...";
+      _lastOutputPath = null;
+    });
+
+    final outPath = await _getOutputFilePath(preset.title, preset.extension);
+    final cmd = preset.buildCommand(_inputFile!.path, outPath);
+
+    await FFmpegKit.execute(cmd).then((session) async {
+      final returnCode = await session.getReturnCode();
+      setState(() {
+        _isProcessing = false;
+        if (ReturnCode.isSuccess(returnCode)) {
           _statusMessage = "Success! Saved to Downloads";
           _lastOutputPath = outPath;
         } else {

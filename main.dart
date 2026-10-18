@@ -232,14 +232,14 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     "Subtitles & Dubbing": [
       PresetItem(
         title: "AI Auto-Dub Video (Voiceover)",
-        subtitle: "1-Tap voice dubbing • Choose 15% or 0% original audio",
+        subtitle: "Zero-Overlap Sequential Dubbing • 15% or 0% Original Audio",
         icon: Icons.record_voice_over_outlined,
         extension: "mp4",
         buildCommand: (i, o) => '',
       ),
       PresetItem(
         title: "AI Auto-Dub + Burn Subtitles",
-        subtitle: "Dub voiceover AND burn subtitles together",
+        subtitle: "Sequential voiceover AND burned subtitles together",
         icon: Icons.spatial_audio_off_outlined,
         extension: "mp4",
         buildCommand: (i, o) => '',
@@ -490,7 +490,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     );
   }
 
-  // Specialized dialog for Dubbing that lets users toggle 15% original background audio vs 0% (no original audio)
   Future<Map<String, dynamic>?> _showDubbingOptionsDialog() async {
     String searchQuery = "";
     bool keepBackgroundAudio = true;
@@ -609,6 +608,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     });
   }
 
+  // FIXED SEQUENTIAL DUBBING ENGINE:
+  // 1. Prevents voices from ever talking over each other by concatenating clips sequentially and auto-pacing speech speed.
+  // 2. Fixes 15% original background audio by mixing just 2 master tracks ([orig] + [master_dub]) instead of 30+ parallel tracks.
   Future<void> _handleAiAutoDubbing({required bool alsoBurnSubtitles}) async {
     final dubChoice = await _showDubbingOptionsDialog();
     if (dubChoice == null) return;
@@ -626,6 +628,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       final tempDir = await getTemporaryDirectory();
       final tempWavPath = '${tempDir.path}/whisper_dub_input.wav';
       final tempSrtPath = '${tempDir.path}/whisper_dub_subs.srt';
+      final masterDubWavPath = '${tempDir.path}/master_dub_track.wav';
 
       final wavCmd = '-y -i "${_inputFile!.path}" -vn -ar 16000 -ac 1 -c:a pcm_s16le "$tempWavPath"';
       final wavSession = await FFmpegKit.execute(wavCmd);
@@ -666,12 +669,12 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       }
 
       setState(() {
-        _statusMessage = "Step 3/4: Translating & generating ${segments.length} voiceover clips...";
+        _statusMessage = "Step 3/4: Building non-overlapping voiceover timeline (${segments.length} lines)...";
       });
 
       final StringBuffer srtBuffer = StringBuffer();
-      final List<String> ttsFiles = [];
-      final List<int> delaysMs = [];
+      final List<String> sequentialWavParts = [];
+      int currentTimelineMs = 0;
 
       for (int i = 0; i < segments.length; i++) {
         final seg = segments[i];
@@ -685,15 +688,49 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         srtBuffer.writeln(translatedLine);
         srtBuffer.writeln();
 
-        final snippetPath = '${tempDir.path}/tts_seg_$i.mp3';
-        final ok = await _downloadTtsSnippet(translatedLine, targetLangCode, snippetPath);
-        if (ok) {
-          ttsFiles.add(snippetPath);
-          delaysMs.add(seg.fromTs.inMilliseconds);
+        final rawMp3Path = '${tempDir.path}/tts_raw_$i.mp3';
+        final ok = await _downloadTtsSnippet(translatedLine, targetLangCode, rawMp3Path);
+        if (!ok) continue;
+
+        final int segStartMs = seg.fromTs.inMilliseconds;
+        final int nextSegStartMs = (i + 1 < segments.length)
+            ? segments[i + 1].fromTs.inMilliseconds
+            : seg.toTs.inMilliseconds + 2500;
+
+        // 1. If there is a gap before this speaker starts talking, insert exact silence so timing matches the video
+        if (segStartMs > currentTimelineMs) {
+          final double gapSec = (segStartMs - currentTimelineMs) / 1000.0;
+          if (gapSec >= 0.05) {
+            final gapWavPath = '${tempDir.path}/seq_gap_$i.wav';
+            await FFmpegKit.execute(
+              '-y -f lavfi -i anullsrc=r=24000:cl=mono -t ${gapSec.toStringAsFixed(3)} -c:a pcm_s16le "$gapWavPath"',
+            );
+            if (await File(gapWavPath).exists()) {
+              sequentialWavParts.add(gapWavPath);
+              currentTimelineMs = segStartMs;
+            }
+          }
         }
+
+        // 2. Calculate how much time this speaker has before the NEXT speaker starts so they NEVER talk over each other
+        final int availableWindowMs = (nextSegStartMs - currentTimelineMs).clamp(600, 20000);
+        final double maxAllowedSec = (availableWindowMs / 1000.0).clamp(0.6, 20.0);
+
+        // Speed up TTS slightly (1.2x) for natural pacing and hard-cap duration at maxAllowedSec so it cannot bleed into the next speaker
+        final segWavPath = '${tempDir.path}/seq_voice_$i.wav';
+        await FFmpegKit.execute(
+          '-y -i "$rawMp3Path" -af "atempo=1.2,apad" -t ${maxAllowedSec.toStringAsFixed(3)} -ar 24000 -ac 1 -c:a pcm_s16le "$segWavPath"',
+        );
+
+        if (await File(segWavPath).exists()) {
+          sequentialWavParts.add(segWavPath);
+          currentTimelineMs += availableWindowMs;
+        }
+
+        if (await File(rawMp3Path).exists()) await File(rawMp3Path).delete();
       }
 
-      if (ttsFiles.isEmpty) {
+      if (sequentialWavParts.isEmpty) {
         setState(() {
           _isProcessing = false;
           _statusMessage = "Failed to generate dubbing audio clips. Check internet connection.";
@@ -702,6 +739,31 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       }
 
       await File(tempSrtPath).writeAsString(srtBuffer.toString());
+
+      // Concatenate all sequential silence gaps and voice clips into ONE single Master Dub Track (zero overlap possible!)
+      final concatListFile = File('${tempDir.path}/concat_list.txt');
+      final StringBuffer concatText = StringBuffer();
+      for (final wavPart in sequentialWavParts) {
+        concatText.writeln("file '$wavPart'");
+      }
+      await concatListFile.writeAsString(concatText.toString());
+
+      final concatSession = await FFmpegKit.execute(
+        '-y -f concat -safe 0 -i "${concatListFile.path}" -c:a pcm_s16le "$masterDubWavPath"',
+      );
+
+      for (final wavPart in sequentialWavParts) {
+        final f = File(wavPart);
+        if (await f.exists()) await f.delete();
+      }
+
+      if (!ReturnCode.isSuccess(await concatSession.getReturnCode())) {
+        setState(() {
+          _isProcessing = false;
+          _statusMessage = "Failed to assemble master dubbing timeline.";
+        });
+        return;
+      }
 
       setState(() {
         _statusMessage = keepBackgroundAudio
@@ -714,42 +776,28 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         "mp4",
       );
 
-      // Uses 0.15 (15%) if switch is ON, or 0.0 (completely muted) if switch is OFF
-      final String bgVolume = keepBackgroundAudio ? "0.15" : "0.0";
-      final StringBuffer inputsArg = StringBuffer('-y -i "${_inputFile!.path}" ');
-      final StringBuffer filterComplex = StringBuffer('[0:a]volume=$bgVolume[orig];');
-      final StringBuffer mixInputs = StringBuffer('[orig]');
-
-      for (int i = 0; i < ttsFiles.length; i++) {
-        inputsArg.write('-i "${ttsFiles[i]}" ');
-        final int inputIdx = i + 1;
-        final int delay = delaysMs[i];
-        filterComplex.write('[$inputIdx:a]adelay=$delay|$delay,volume=1.8[a$i];');
-        mixInputs.write('[a$i]');
-      }
-
-      final int totalAudioStreams = ttsFiles.length + 1;
-      filterComplex.write('${mixInputs.toString()}amix=inputs=$totalAudioStreams:duration=first:dropout_transition=0:normalize=0[aout]');
-
       String videoPart = '-map 0:v -c:v copy';
       if (alsoBurnSubtitles) {
         videoPart = '-vf "subtitles=$tempSrtPath:fontsdir=/system/fonts:force_style=\'FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22';
       }
 
-      final String dubCmd = '${inputsArg.toString()}-filter_complex "${filterComplex.toString()}" $videoPart -map "[aout]" -c:a aac -b:a 192k "$outVideoPath"';
+      // Clean 2-track audio mix:
+      // If 0% (Muted): Directly uses the Master Dub Track as the video's audio.
+      // If 15% (Background): Mixes Track 0 (Original at 15%) + Track 1 (Master Dub at 200% boost) with normalize=0 so dubbing is loud & crystal clear!
+      String dubCmd;
+      if (keepBackgroundAudio) {
+        dubCmd = '-y -i "${_inputFile!.path}" -i "$masterDubWavPath" -filter_complex "[0:a]volume=0.15[bg];[1:a]volume=2.0[dub];[bg][dub]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]" $videoPart -map "[aout]" -c:a aac -b:a 192k "$outVideoPath"';
+      } else {
+        dubCmd = '-y -i "${_inputFile!.path}" -i "$masterDubWavPath" $videoPart -map 1:a -c:a aac -b:a 192k -shortest "$outVideoPath"';
+      }
 
       final dubSession = await FFmpegKit.execute(dubCmd);
       final dubCode = await dubSession.getReturnCode();
 
-      for (final f in ttsFiles) {
-        final fileObj = File(f);
-        if (await fileObj.exists()) await fileObj.delete();
-      }
-
       setState(() {
         _isProcessing = false;
         if (ReturnCode.isSuccess(dubCode)) {
-          _statusMessage = "Success! Dubbed Video saved to Downloads";
+          _statusMessage = "Success! Clean Dubbed Video saved to Downloads";
           _lastOutputPath = outVideoPath;
         } else {
           _statusMessage = "Dubbing mix failed (Code: ${dubCode?.getValue()})";

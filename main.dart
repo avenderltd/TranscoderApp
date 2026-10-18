@@ -592,7 +592,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     await File(srtResult.files.single.path!).copy(safeSrtFile.path);
 
     final outPath = await _getOutputFilePath("Burned_Subs", "mp4");
-    final cmd = '-y -i "${_inputFile!.path}" -vf "subtitles=${safeSrtFile.path}:fontsdir=/system/fonts:force_style=\'FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -c:a copy "$outPath"';
+    final cmd = '-y -i "${_inputFile!.path}" -map 0:v:0 -map 0:a? -vf "subtitles=${safeSrtFile.path}:fontsdir=/system/fonts:force_style=\'FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p -c:a copy "$outPath"';
 
     await FFmpegKit.execute(cmd).then((session) async {
       final returnCode = await session.getReturnCode();
@@ -608,9 +608,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     });
   }
 
-  // FIXED SEQUENTIAL DUBBING ENGINE:
-  // 1. Prevents voices from ever talking over each other by concatenating clips sequentially and auto-pacing speech speed.
-  // 2. Fixes 15% original background audio by mixing just 2 master tracks ([orig] + [master_dub]) instead of 30+ parallel tracks.
   Future<void> _handleAiAutoDubbing({required bool alsoBurnSubtitles}) async {
     final dubChoice = await _showDubbingOptionsDialog();
     if (dubChoice == null) return;
@@ -697,7 +694,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             ? segments[i + 1].fromTs.inMilliseconds
             : seg.toTs.inMilliseconds + 2500;
 
-        // 1. If there is a gap before this speaker starts talking, insert exact silence so timing matches the video
         if (segStartMs > currentTimelineMs) {
           final double gapSec = (segStartMs - currentTimelineMs) / 1000.0;
           if (gapSec >= 0.05) {
@@ -712,11 +708,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           }
         }
 
-        // 2. Calculate how much time this speaker has before the NEXT speaker starts so they NEVER talk over each other
         final int availableWindowMs = (nextSegStartMs - currentTimelineMs).clamp(600, 20000);
         final double maxAllowedSec = (availableWindowMs / 1000.0).clamp(0.6, 20.0);
 
-        // Speed up TTS slightly (1.2x) for natural pacing and hard-cap duration at maxAllowedSec so it cannot bleed into the next speaker
         final segWavPath = '${tempDir.path}/seq_voice_$i.wav';
         await FFmpegKit.execute(
           '-y -i "$rawMp3Path" -af "atempo=1.2,apad" -t ${maxAllowedSec.toStringAsFixed(3)} -ar 24000 -ac 1 -c:a pcm_s16le "$segWavPath"',
@@ -740,7 +734,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
       await File(tempSrtPath).writeAsString(srtBuffer.toString());
 
-      // Concatenate all sequential silence gaps and voice clips into ONE single Master Dub Track (zero overlap possible!)
       final concatListFile = File('${tempDir.path}/concat_list.txt');
       final StringBuffer concatText = StringBuffer();
       for (final wavPart in sequentialWavParts) {
@@ -767,8 +760,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
       setState(() {
         _statusMessage = keepBackgroundAudio
-            ? "Step 4/4: Mixing voiceover with 15% original audio..."
-            : "Step 4/4: Mixing pure voiceover (0% original audio)...";
+            ? "Step 4/4: Mixing video + voiceover (15% background)..."
+            : "Step 4/4: Mixing video + pure voiceover (0% background)...";
       });
 
       final outVideoPath = await _getOutputFilePath(
@@ -776,19 +769,20 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         "mp4",
       );
 
-      String videoPart = '-map 0:v -c:v copy';
+      // CRITICAL FIX FOR BLACK SCREEN & MISSING SUBTITLES:
+      // Explicitly map 0:v:0 (main video camera stream, ignoring embedded cover art) and force yuv420p when burning subtitles!
+      String videoMappingAndCodec;
       if (alsoBurnSubtitles) {
-        videoPart = '-vf "subtitles=$tempSrtPath:fontsdir=/system/fonts:force_style=\'FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22';
+        videoMappingAndCodec = '-map 0:v:0 -vf "subtitles=$tempSrtPath:fontsdir=/system/fonts:force_style=\'FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p';
+      } else {
+        videoMappingAndCodec = '-map 0:v:0 -c:v copy';
       }
 
-      // Clean 2-track audio mix:
-      // If 0% (Muted): Directly uses the Master Dub Track as the video's audio.
-      // If 15% (Background): Mixes Track 0 (Original at 15%) + Track 1 (Master Dub at 200% boost) with normalize=0 so dubbing is loud & crystal clear!
       String dubCmd;
       if (keepBackgroundAudio) {
-        dubCmd = '-y -i "${_inputFile!.path}" -i "$masterDubWavPath" -filter_complex "[0:a]volume=0.15[bg];[1:a]volume=2.0[dub];[bg][dub]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]" $videoPart -map "[aout]" -c:a aac -b:a 192k "$outVideoPath"';
+        dubCmd = '-y -i "${_inputFile!.path}" -i "$masterDubWavPath" -filter_complex "[0:a:0]volume=0.15[bg];[1:a:0]volume=2.0[dub];[bg][dub]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]" $videoMappingAndCodec -map "[aout]" -c:a aac -b:a 192k "$outVideoPath"';
       } else {
-        dubCmd = '-y -i "${_inputFile!.path}" -i "$masterDubWavPath" $videoPart -map 1:a -c:a aac -b:a 192k -shortest "$outVideoPath"';
+        dubCmd = '-y -i "${_inputFile!.path}" -i "$masterDubWavPath" $videoMappingAndCodec -map 1:a:0 -c:a aac -b:a 192k -shortest "$outVideoPath"';
       }
 
       final dubSession = await FFmpegKit.execute(dubCmd);
@@ -797,7 +791,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       setState(() {
         _isProcessing = false;
         if (ReturnCode.isSuccess(dubCode)) {
-          _statusMessage = "Success! Clean Dubbed Video saved to Downloads";
+          _statusMessage = "Success! Video + Dubbing saved to Downloads";
           _lastOutputPath = outVideoPath;
         } else {
           _statusMessage = "Dubbing mix failed (Code: ${dubCode?.getValue()})";
@@ -907,7 +901,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       setState(() => _statusMessage = "Step 4/4: Burning Subtitles into Video...");
       final outVideoPath = await _getOutputFilePath("Subtitled_$targetLangCode", "mp4");
 
-      final burnCmd = '-y -i "${_inputFile!.path}" -vf "subtitles=$tempSrtPath:fontsdir=/system/fonts:force_style=\'FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -c:a copy "$outVideoPath"';
+      final burnCmd = '-y -i "${_inputFile!.path}" -map 0:v:0 -map 0:a? -vf "subtitles=$tempSrtPath:fontsdir=/system/fonts:force_style=\'FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p -c:a copy "$outVideoPath"';
 
       final burnSession = await FFmpegKit.execute(burnCmd);
       final burnCode = await burnSession.getReturnCode();

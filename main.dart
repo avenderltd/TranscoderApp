@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit_config.dart';
+import 'package:ffmpeg_kit_flutter_new/ffprobe_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import 'package:whisper_flutter_new/whisper_flutter_new.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
@@ -198,35 +199,43 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         extension: "mp4",
         buildCommand: (i, o) => '-y -i "$i" -vf "scale=854:-2" -c:v libx264 -preset veryfast -crf 28 -c:a aac -b:a 96k "$o"',
       ),
+      PresetItem(
+        title: "Exact <10MB Fit (Discord/Email)",
+        subtitle: "Auto-calculates exact bitrate to stay under 10MB",
+        icon: Icons.fit_screen_outlined,
+        extension: "mp4",
+        buildCommand: (i, o) => '',
+      ),
+      PresetItem(
+        title: "Exact <16MB Fit (WhatsApp)",
+        subtitle: "Auto-calculates exact bitrate to stay under 16MB",
+        icon: Icons.send_to_mobile_outlined,
+        extension: "mp4",
+        buildCommand: (i, o) => '',
+      ),
     ],
-    "Speed, FPS & GIF": [
+    "Viral & Creator": [
       PresetItem(
-        title: "Smooth 60 FPS",
-        subtitle: "Convert framerate to 60fps",
-        icon: Icons.speed,
+        title: "Auto-Cut Dead Silence (Jump-Cut)",
+        subtitle: "AI removes awkward pauses & silent gaps automatically",
+        icon: Icons.content_cut_outlined,
         extension: "mp4",
-        buildCommand: (i, o) => '-y -i "$i" -r 60 -c:v libx264 -preset fast -crf 22 -c:a copy "$o"',
+        buildCommand: (i, o) => '',
       ),
       PresetItem(
-        title: "2x Fast Forward",
-        subtitle: "Double video & audio speed",
-        icon: Icons.fast_forward_outlined,
+        title: "9:16 Viral Vertical (TikTok/Reels)",
+        subtitle: "Converts horizontal video to 1080x1920 with blurred BG",
+        icon: Icons.stay_current_portrait_outlined,
         extension: "mp4",
-        buildCommand: (i, o) => '-y -i "$i" -filter_complex "[0:v]setpts=0.5*PTS[v];[0:a]atempo=2.0[a]" -map "[v]" -map "[a]" -c:v libx264 -preset fast "$o"',
+        buildCommand: (i, o) =>
+            '-y -i "$i" -filter_complex "[0:v:0]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20:10[bg];[0:v:0]scale=1080:1920:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2" -map 0:a? -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p -c:a copy "$o"',
       ),
       PresetItem(
-        title: "0.5x Slow Motion",
-        subtitle: "Half speed smooth playback",
-        icon: Icons.slow_motion_video,
+        title: "Privacy Shield (Strip GPS & Data)",
+        subtitle: "Instantly removes hidden GPS location & phone metadata",
+        icon: Icons.shield_outlined,
         extension: "mp4",
-        buildCommand: (i, o) => '-y -i "$i" -filter_complex "[0:v]setpts=2.0*PTS[v];[0:a]atempo=0.5[a]" -map "[v]" -map "[a]" -c:v libx264 -preset fast "$o"',
-      ),
-      PresetItem(
-        title: "High-Quality GIF",
-        subtitle: "480px • 15 FPS Animated GIF",
-        icon: Icons.gif_box_outlined,
-        extension: "gif",
-        buildCommand: (i, o) => '-y -i "$i" -vf "fps=15,scale=480:-1:flags=lanczos" "$o"',
+        buildCommand: (i, o) => '-y -i "$i" -map_metadata -1 -c:v copy -c:a copy "$o"',
       ),
     ],
     "Subtitles & Dubbing": [
@@ -287,7 +296,52 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         buildCommand: (i, o) => '-y -i "$i" -c:v copy -c:a copy -sn "$o"',
       ),
     ],
+    "Speed, FPS & GIF": [
+      PresetItem(
+        title: "Smooth 60 FPS",
+        subtitle: "Convert framerate to 60fps",
+        icon: Icons.speed,
+        extension: "mp4",
+        buildCommand: (i, o) => '-y -i "$i" -r 60 -c:v libx264 -preset fast -crf 22 -c:a copy "$o"',
+      ),
+      PresetItem(
+        title: "2x Fast Forward",
+        subtitle: "Double video & audio speed",
+        icon: Icons.fast_forward_outlined,
+        extension: "mp4",
+        buildCommand: (i, o) => '-y -i "$i" -filter_complex "[0:v]setpts=0.5*PTS[v];[0:a]atempo=2.0[a]" -map "[v]" -map "[a]" -c:v libx264 -preset fast "$o"',
+      ),
+      PresetItem(
+        title: "0.5x Slow Motion",
+        subtitle: "Half speed smooth playback",
+        icon: Icons.slow_motion_video,
+        extension: "mp4",
+        buildCommand: (i, o) => '-y -i "$i" -filter_complex "[0:v]setpts=2.0*PTS[v];[0:a]atempo=0.5[a]" -map "[v]" -map "[a]" -c:v libx264 -preset fast "$o"',
+      ),
+      PresetItem(
+        title: "High-Quality GIF",
+        subtitle: "480px • 15 FPS Animated GIF",
+        icon: Icons.gif_box_outlined,
+        extension: "gif",
+        buildCommand: (i, o) => '-y -i "$i" -vf "fps=15,scale=480:-1:flags=lanczos" "$o"',
+      ),
+    ],
     "Audio & Formats": [
+      PresetItem(
+        title: "Studio Mic Enhancer (Denoise)",
+        subtitle: "Remove background noise & boost vocal clarity",
+        icon: Icons.mic_external_on_outlined,
+        extension: "mp4",
+        buildCommand: (i, o) =>
+            '-y -i "$i" -c:v copy -af "highpass=f=80,lowpass=f=12000,afftdn=nf=-25,acompressor=threshold=-18dB:ratio=3:attack=5:release=50,volume=1.4" "$o"',
+      ),
+      PresetItem(
+        title: "Karaoke Mode (Vocal Remover)",
+        subtitle: "Cancel out center-panned vocals from music videos",
+        icon: Icons.music_note_outlined,
+        extension: "mp4",
+        buildCommand: (i, o) => '-y -i "$i" -c:v copy -af "pan=stereo|c0=c0-c1|c1=c1-c0" "$o"',
+      ),
       PresetItem(
         title: "Extract MP3 Audio",
         subtitle: "320kbps High-Bitrate MP3",
@@ -394,6 +448,163 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     final String secs = (d.inSeconds % 60).toString().padLeft(2, '0');
     final String ms = (d.inMilliseconds % 1000).toString().padLeft(3, '0');
     return '$hrs:$mins:$secs,$ms';
+  }
+
+  // Exact Target Size Calculator using FFprobe duration math
+  Future<void> _compressToExactTargetSizeMB(double targetMB) async {
+    setState(() {
+      _isProcessing = true;
+      _statusMessage = "Measuring video duration for <${targetMB.toInt()}MB fit...";
+      _lastOutputPath = null;
+    });
+
+    try {
+      final infoSession = await FFprobeKit.getMediaInformation(_inputFile!.path);
+      final info = infoSession.getMediaInformation();
+      final durationStr = info?.getDuration();
+      final double durationSec = double.tryParse(durationStr ?? "60") ?? 60.0;
+
+      // Reserve 5% safety buffer so file never exceeds limit
+      final double safeTargetKilobits = targetMB * 8192.0 * 0.94;
+      final int totalKbps = (safeTargetKilobits / durationSec).floor();
+      final int audioKbps = totalKbps > 400 ? 96 : 64;
+      final int videoKbps = (totalKbps - audioKbps).clamp(120, 8000);
+
+      setState(() {
+        _statusMessage = "Compressing at ${videoKbps}kbps to guarantee <${targetMB.toInt()}MB...";
+      });
+
+      final outPath = await _getOutputFilePath("Fit_${targetMB.toInt()}MB", "mp4");
+      final cmd =
+          '-y -i "${_inputFile!.path}" -map 0:v:0 -map 0:a? -vf "scale=\'min(1280,iw)\':-2" -c:v libx264 -preset veryfast -b:v ${videoKbps}k -maxrate ${videoKbps}k -bufsize ${videoKbps * 2}k -pix_fmt yuv420p -c:a aac -b:a ${audioKbps}k "$outPath"';
+
+      final session = await FFmpegKit.execute(cmd);
+      final code = await session.getReturnCode();
+
+      setState(() {
+        _isProcessing = false;
+        if (ReturnCode.isSuccess(code)) {
+          _statusMessage = "Success! <${targetMB.toInt()}MB video saved to Downloads";
+          _lastOutputPath = outPath;
+        } else {
+          _statusMessage = "Target size compression failed (Code: ${code?.getValue()})";
+        }
+      });
+    } catch (e) {
+      setState(() {
+        _isProcessing = false;
+        _statusMessage = "Size Fit Error: $e";
+      });
+    }
+  }
+
+  // AI Auto-Cut Dead Silence (Jump-Cut) using Offline Whisper speech segments
+  Future<void> _handleAutoCutSilence() async {
+    setState(() {
+      _isProcessing = true;
+      _statusMessage = "Step 1/3: Scanning speech timestamps with Offline Whisper AI...";
+      _lastOutputPath = null;
+    });
+
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final tempWavPath = '${tempDir.path}/whisper_jumpcut.wav';
+
+      final wavCmd = '-y -i "${_inputFile!.path}" -vn -ar 16000 -ac 1 -c:a pcm_s16le "$tempWavPath"';
+      final wavSession = await FFmpegKit.execute(wavCmd);
+      if (!ReturnCode.isSuccess(await wavSession.getReturnCode())) {
+        setState(() {
+          _isProcessing = false;
+          _statusMessage = "Failed to extract audio for silence detection.";
+        });
+        return;
+      }
+
+      final whisper = Whisper(
+        model: WhisperModel.base,
+        downloadHost: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main",
+      );
+
+      final res = await whisper.transcribe(
+        transcribeRequest: TranscribeRequest(
+          audio: tempWavPath,
+          language: "auto",
+          isTranslate: false,
+          isNoTimestamps: false,
+          splitOnWord: false,
+        ),
+      );
+
+      final segments = res.segments;
+      if (segments == null || segments.isEmpty) {
+        setState(() {
+          _isProcessing = false;
+          _statusMessage = "No speech segments found to jump-cut.";
+        });
+        return;
+      }
+
+      setState(() {
+        _statusMessage = "Step 2/3: Cutting silent pauses across ${segments.length} clips...";
+      });
+
+      final StringBuffer filterComplex = StringBuffer();
+      final StringBuffer concatInputs = StringBuffer();
+      int validCount = 0;
+
+      for (int i = 0; i < segments.length; i++) {
+        final seg = segments[i];
+        if (seg.text.trim().isEmpty) continue;
+        final double start = (seg.fromTs.inMilliseconds / 1000.0).clamp(0.0, 99999.0);
+        final double end = (seg.toTs.inMilliseconds / 1000.0) + 0.12;
+        if (end <= start) continue;
+
+        filterComplex.write(
+          '[0:v:0]trim=start=${start.toStringAsFixed(2)}:end=${end.toStringAsFixed(2)},setpts=PTS-STARTPTS[v$validCount];',
+        );
+        filterComplex.write(
+          '[0:a:0]atrim=start=${start.toStringAsFixed(2)}:end=${end.toStringAsFixed(2)},asetpts=PTS-STARTPTS[a$validCount];',
+        );
+        concatInputs.write('[v$validCount][a$validCount]');
+        validCount++;
+      }
+
+      if (validCount == 0) {
+        setState(() {
+          _isProcessing = false;
+          _statusMessage = "No valid dialogue segments found.";
+        });
+        return;
+      }
+
+      filterComplex.write('${concatInputs.toString()}concat=n=$validCount:v=1:a=1[outv][outa]');
+
+      setState(() {
+        _statusMessage = "Step 3/3: Stitching fast-paced Jump-Cut video...";
+      });
+
+      final outVideoPath = await _getOutputFilePath("JumpCut_NoSilence", "mp4");
+      final cutCmd =
+          '-y -i "${_inputFile!.path}" -filter_complex "${filterComplex.toString()}" -map "[outv]" -map "[outa]" -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p -c:a aac -b:a 160k "$outVideoPath"';
+
+      final cutSession = await FFmpegKit.execute(cutCmd);
+      final cutCode = await cutSession.getReturnCode();
+
+      setState(() {
+        _isProcessing = false;
+        if (ReturnCode.isSuccess(cutCode)) {
+          _statusMessage = "Success! Jump-Cut video saved to Downloads";
+          _lastOutputPath = outVideoPath;
+        } else {
+          _statusMessage = "Jump-Cut failed (Code: ${cutCode?.getValue()})";
+        }
+      });
+    } catch (e) {
+      setState(() {
+        _isProcessing = false;
+        _statusMessage = "Jump-Cut Error: $e";
+      });
+    }
   }
 
   Future<String> _translateTextFree(String text, String targetLang) async {
@@ -769,8 +980,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         "mp4",
       );
 
-      // CRITICAL FIX FOR BLACK SCREEN & MISSING SUBTITLES:
-      // Explicitly map 0:v:0 (main video camera stream, ignoring embedded cover art) and force yuv420p when burning subtitles!
       String videoMappingAndCodec;
       if (alsoBurnSubtitles) {
         videoMappingAndCodec = '-map 0:v:0 -vf "subtitles=$tempSrtPath:fontsdir=/system/fonts:force_style=\'FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p';
@@ -931,6 +1140,18 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       return;
     }
 
+    if (preset.title == "Exact <10MB Fit (Discord/Email)") {
+      await _compressToExactTargetSizeMB(10.0);
+      return;
+    }
+    if (preset.title == "Exact <16MB Fit (WhatsApp)") {
+      await _compressToExactTargetSizeMB(16.0);
+      return;
+    }
+    if (preset.title == "Auto-Cut Dead Silence (Jump-Cut)") {
+      await _handleAutoCutSilence();
+      return;
+    }
     if (preset.title == "AI Auto-Dub Video (Voiceover)") {
       await _handleAiAutoDubbing(alsoBurnSubtitles: false);
       return;

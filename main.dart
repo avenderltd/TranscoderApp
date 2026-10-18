@@ -2,7 +2,9 @@ import 'dart:io';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit_config.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
+import 'package:whisper_flutter_new/whisper_flutter_new.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
@@ -59,6 +61,80 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   bool _isProcessing = false;
   String _statusMessage = "Select a media file to begin";
   String? _lastOutputPath;
+
+  // 70+ Whisper Supported World Languages
+  final Map<String, String> _worldLanguages = {
+    "Auto-Detect Language": "auto",
+    "English": "en",
+    "Arabic (العربية)": "ar",
+    "German (Deutsch)": "de",
+    "French (Français)": "fr",
+    "Spanish (Español)": "es",
+    "Turkish (Türkçe)": "tr",
+    "Russian (Русский)": "ru",
+    "Chinese (中文)": "zh",
+    "Hindi (हिन्दी)": "hi",
+    "Urdu (اردو)": "ur",
+    "Portuguese (Português)": "pt",
+    "Italian (Italiano)": "it",
+    "Japanese (日本語)": "ja",
+    "Korean (한국어)": "ko",
+    "Dutch (Nederlands)": "nl",
+    "Polish (Polski)": "pl",
+    "Persian (فارسی)": "fa",
+    "Indonesian (Bahasa Indonesia)": "id",
+    "Vietnamese (Tiếng Việt)": "vi",
+    "Thai (ไทย)": "th",
+    "Ukrainian (Українська)": "uk",
+    "Greek (Ελληνικά)": "el",
+    "Swedish (Svenska)": "sv",
+    "Czech (Čeština)": "cs",
+    "Romanian (Română)": "ro",
+    "Hungarian (Magyar)": "hu",
+    "Danish (Dansk)": "da",
+    "Finnish (Suomi)": "fi",
+    "Norwegian (Norsk)": "no",
+    "Hebrew (עברית)": "he",
+    "Malay (Bahasa Melayu)": "ms",
+    "Tagalog / Filipino": "tl",
+    "Swahili (Kiswahili)": "sw",
+    "Bengali (বাংলা)": "bn",
+    "Tamil (தமிழ்)": "ta",
+    "Telugu (తెలుగు)": "te",
+    "Punjabi (پنجابی)": "pa",
+    "Marathi (मराठी)": "mr",
+    "Gujarati (ગુજરાતી)": "gu",
+    "Kannada (ಕನ್ನಡ)": "kn",
+    "Malayalam (മലയാളം)": "ml",
+    "Nepali (नेपाली)": "ne",
+    "Sinhala (සිංහල)": "si",
+    "Kurdish (Kurdî)": "ku",
+    "Pashto (پښتو)": "ps",
+    "Somali (Soomaali)": "so",
+    "Amharic (አማርኛ)": "am",
+    "Hausa": "ha",
+    "Yoruba": "yo",
+    "Afrikaans": "af",
+    "Albanian (Shqip)": "sq",
+    "Armenian (Հայերեն)": "hy",
+    "Azerbaijani (Azərbaycan)": "az",
+    "Bosnian (Bosanski)": "bs",
+    "Bulgarian (Български)": "bg",
+    "Catalan (Català)": "ca",
+    "Croatian (Hrvatski)": "hr",
+    "Estonian (Eesti)": "et",
+    "Georgian (ქართული)": "ka",
+    "Icelandic (Íslenska)": "is",
+    "Kazakh (Қазақ тілі)": "kk",
+    "Latvian (Latviešu)": "lv",
+    "Lithuanian (Lietuvių)": "lt",
+    "Macedonian (Македонски)": "mk",
+    "Mongolian (Монгол)": "mn",
+    "Serbian (Српски)": "sr",
+    "Slovak (Slovenčina)": "sk",
+    "Slovenian (Slovenščina)": "sl",
+    "Uzbek (Oʻzbek)": "uz",
+  };
 
   final Map<String, List<PresetItem>> _categories = {
     "Resolution & Quality": [
@@ -124,10 +200,24 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     "Subtitles & Transcribe": [
       PresetItem(
         title: "AI Auto-Subtitles (Burn-In)",
-        subtitle: "Choose language & burn captions onto video",
+        subtitle: "100% Free On-Device Whisper AI • 70+ Languages",
         icon: Icons.auto_awesome,
         extension: "mp4",
-        buildCommand: (i, o) => '', // Handled dynamically via language selector
+        buildCommand: (i, o) => '',
+      ),
+      PresetItem(
+        title: "AI Auto-Transcribe (.SRT File Only)",
+        subtitle: "Generate & save .srt file offline with Whisper AI",
+        icon: Icons.description_outlined,
+        extension: "srt",
+        buildCommand: (i, o) => '',
+      ),
+      PresetItem(
+        title: "Burn External .SRT into Video",
+        subtitle: "Pick an existing .srt file on your phone & burn it in",
+        icon: Icons.closed_caption_outlined,
+        extension: "mp4",
+        buildCommand: (i, o) => '',
       ),
       PresetItem(
         title: "Extract Embedded Subtitles",
@@ -200,6 +290,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   @override
   void initState() {
     super.initState();
+    // Register Android system fonts so FFmpeg subtitle burning never fails with Code 1
+    FFmpegKitConfig.setFontDirectoryList(["/system/fonts", "/system/font"], {});
     _setupShareIntent();
   }
 
@@ -251,71 +343,104 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     return '${dir.path}/Transcoded_${cleanTitle}_$timestamp.$ext';
   }
 
-  Future<void> _showLanguageDialogAndRun(PresetItem preset) async {
-    if (_inputFile == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please select a video first!")),
-      );
-      return;
-    }
+  String _formatDurationToSrt(Duration d) {
+    final String hrs = d.inHours.toString().padLeft(2, '0');
+    final String mins = (d.inMinutes % 60).toString().padLeft(2, '0');
+    final String secs = (d.inSeconds % 60).toString().padLeft(2, '0');
+    final String ms = (d.inMilliseconds % 1000).toString().padLeft(3, '0');
+    return '$hrs:$mins:$secs,$ms';
+  }
 
-    final languages = [
-      "English", "Arabic (العربية)", "German (Deutsch)", 
-      "French (Français)", "Spanish (Español)", "Turkish (Türkçe)", 
-      "Italian (Italiano)", "Japanese (日本語)", "Korean (한국어)"
-    ];
+  Future<Map<String, dynamic>?> _showSearchableLanguageDialog() async {
+    String searchQuery = "";
+    bool translateToEnglish = false;
 
-    String selectedLang = languages.first;
-
-    await showDialog(
+    return await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1E1E1E),
-          title: const Text("Select Subtitle Language", style: TextStyle(color: Colors.tealAccent)),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: ListView.builder(
-              shrinkWrap: true,
-              itemCount: languages.length,
-              itemBuilder: (context, index) {
-                return ListTile(
-                  title: Text(languages[index], style: const TextStyle(color: Colors.white)),
-                  onTap: () {
-                    selectedLang = languages[index];
-                    Navigator.pop(context);
-                  },
-                );
-              },
-            ),
-          ),
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final filteredEntries = _worldLanguages.entries
+                .where((e) => e.key.toLowerCase().contains(searchQuery.toLowerCase()))
+                .toList();
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1E1E1E),
+              title: const Text("Select Audio Language", style: TextStyle(color: Colors.tealAccent)),
+              content: SizedBox(
+                width: double.maxFinite,
+                height: 420,
+                child: Column(
+                  children: [
+                    TextField(
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: "Search 70+ languages...",
+                        hintStyle: const TextStyle(color: Colors.white38),
+                        prefixIcon: const Icon(Icons.search, color: Colors.tealAccent),
+                        filled: true,
+                        fillColor: const Color(0xFF121212),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onChanged: (val) => setModalState(() => searchQuery = val),
+                    ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      activeColor: Colors.tealAccent,
+                      title: const Text("Translate to English", style: TextStyle(color: Colors.white, fontSize: 13)),
+                      subtitle: const Text("Convert foreign speech into English subtitles", style: TextStyle(color: Colors.white54, fontSize: 11)),
+                      value: translateToEnglish,
+                      onChanged: (val) => setModalState(() => translateToEnglish = val),
+                    ),
+                    const Divider(color: Colors.white24),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: filteredEntries.length,
+                        itemBuilder: (context, index) {
+                          final entry = filteredEntries[index];
+                          return ListTile(
+                            title: Text(entry.key, style: const TextStyle(color: Colors.white)),
+                            trailing: Text(entry.value.toUpperCase(), style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                            onTap: () => Navigator.pop(context, {
+                              'lang': entry.value,
+                              'translate': translateToEnglish,
+                            }),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
         );
       },
     );
+  }
+
+  Future<void> _burnExternalSrt() async {
+    FilePickerResult? srtResult = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['srt', 'vtt', 'ass'],
+    );
+    if (srtResult == null || srtResult.files.single.path == null) return;
 
     setState(() {
       _isProcessing = true;
-      _statusMessage = "Generating & Burning Subtitles ($selectedLang)...";
+      _statusMessage = "Burning external subtitles into video...";
       _lastOutputPath = null;
     });
 
-    final outPath = await _getOutputFilePath("Subtitles_$selectedLang", "mp4");
-    
-    // Generates localized subtitle text block and burns it directly into video stream
-    final srtTempPath = '${outPath}.srt';
-    final srtFile = File(srtTempPath);
-    await srtFile.writeAsString(
-      "1\n00:00:00,000 --> 00:00:15,000\n[$selectedLang Auto-Subtitles Generated]\n\n2\n00:00:15,000 --> 00:00:30,000\n[Processed Offline via Media Studio]\n"
-    );
+    final tempDir = await getTemporaryDirectory();
+    final safeSrtFile = File('${tempDir.path}/clean_subs.srt');
+    await File(srtResult.files.single.path!).copy(safeSrtFile.path);
 
-    // FFmpeg filter to hardcode (burn-in) subtitles onto the video frames
-    final cmd = '-y -i "${_inputFile!.path}" -vf "subtitles=$srtTempPath:force_style=\'FontSize=24,PrimaryColour=&H00FFFF&\'" -c:a copy "$outPath"';
+    final outPath = await _getOutputFilePath("Burned_Subs", "mp4");
+    final cmd = '-y -i "${_inputFile!.path}" -vf "subtitles=${safeSrtFile.path}:fontsdir=/system/fonts:force_style=\'FontSize=20,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -c:a copy "$outPath"';
 
     await FFmpegKit.execute(cmd).then((session) async {
       final returnCode = await session.getReturnCode();
-      if (await srtFile.exists()) {
-        await srtFile.delete(); // cleanup temp srt
-      }
       setState(() {
         _isProcessing = false;
         if (ReturnCode.isSuccess(returnCode)) {
@@ -328,33 +453,102 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     });
   }
 
-  Future<void> _runPreset(PresetItem preset) async {
-    if (_inputFile == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please select a video first!")),
-      );
-      return;
-    }
+  Future<void> _handleOfflineWhisperSubtitles({required bool burnIntoVideo}) async {
+    final choice = await _showSearchableLanguageDialog();
+    if (choice == null) return;
 
-    if (preset.title.contains("AI Auto-Subtitles")) {
-      await _showLanguageDialogAndRun(preset);
-      return;
-    }
+    final String selectedLangCode = choice['lang'];
+    final bool translateToEnglish = choice['translate'];
 
     setState(() {
       _isProcessing = true;
-      _statusMessage = "Running: ${preset.title}...";
+      _statusMessage = "Step 1/3: Converting audio to 16kHz WAV for Whisper...";
       _lastOutputPath = null;
     });
 
-    final outPath = await _getOutputFilePath(preset.title, preset.extension);
-    final cmd = preset.buildCommand(_inputFile!.path, outPath);
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final tempWavPath = '${tempDir.path}/whisper_input.wav';
+      final tempSrtPath = '${tempDir.path}/whisper_subs.srt';
 
-    await FFmpegKit.execute(cmd).then((session) async {
-      final returnCode = await session.getReturnCode();
+      // Whisper.cpp strictly requires 16kHz mono 16-bit PCM WAV
+      final wavCmd = '-y -i "${_inputFile!.path}" -vn -ar 16000 -ac 1 -c:a pcm_s16le "$tempWavPath"';
+      final wavSession = await FFmpegKit.execute(wavCmd);
+      if (!ReturnCode.isSuccess(await wavSession.getReturnCode())) {
+        setState(() {
+          _isProcessing = false;
+          _statusMessage = "Failed to prepare 16kHz WAV audio.";
+        });
+        return;
+      }
+
+      setState(() {
+        _statusMessage = "Step 2/3: Running Offline Whisper AI (1st run downloads ~140MB model)...";
+      });
+
+      final whisper = Whisper(
+        model: WhisperModel.base,
+        downloadHost: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main",
+      );
+
+      final res = await whisper.transcribe(
+        transcribeRequest: TranscribeRequest(
+          audio: tempWavPath,
+          language: selectedLangCode,
+          isTranslate: translateToEnglish,
+          isNoTimestamps: false,
+          splitOnWord: false,
+        ),
+      );
+
+      final segments = res.segments;
+      final StringBuffer srtBuffer = StringBuffer();
+
+      if (segments != null && segments.isNotEmpty) {
+        for (int i = 0; i < segments.length; i++) {
+          final seg = segments[i];
+          srtBuffer.writeln('${i + 1}');
+          srtBuffer.writeln('${_formatDurationToSrt(seg.fromTs)} --> ${_formatDurationToSrt(seg.toTs)}');
+          srtBuffer.writeln(seg.text.trim());
+          srtBuffer.writeln();
+        }
+      } else if (res.text.trim().isNotEmpty) {
+        srtBuffer.writeln('1');
+        srtBuffer.writeln('00:00:00,000 --> 00:05:00,000');
+        srtBuffer.writeln(res.text.trim());
+        srtBuffer.writeln();
+      } else {
+        setState(() {
+          _isProcessing = false;
+          _statusMessage = "No speech detected in audio.";
+        });
+        return;
+      }
+
+      await File(tempSrtPath).writeAsString(srtBuffer.toString());
+
+      if (!burnIntoVideo) {
+        final outSrtPath = await _getOutputFilePath("Whisper_Subtitles_$selectedLangCode", "srt");
+        await File(tempSrtPath).copy(outSrtPath);
+        setState(() {
+          _isProcessing = false;
+          _statusMessage = "Success! Whisper .SRT saved to Downloads";
+          _lastOutputPath = outSrtPath;
+        });
+        return;
+      }
+
+      setState(() => _statusMessage = "Step 3/3: Burning Subtitles into Video...");
+      final outVideoPath = await _getOutputFilePath("Subtitled_$selectedLangCode", "mp4");
+
+      final burnCmd = '-y -i "${_inputFile!.path}" -vf "subtitles=$tempSrtPath:fontsdir=/system/fonts:force_style=\'FontSize=20,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -c:a copy "$outVideoPath"';
+
+      final burnSession = await FFmpegKit.execute(burnCmd);
+      final burnCode = await burnSession.getReturnCode();
+
       setState(() {
         _isProcessing = false;
-        if (ReturnCode.isSuccess(returnCode)) {
+        if (ReturnCode.isSuccess(burnCode)) {
           _statusMessage = "Success! Saved to Downloads";
           _lastOutputPath = outPath;
         } else {
@@ -448,6 +642,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         Flexible(
                           child: Text(
                             _statusMessage,
+                            textAlign: TextAlign.center,
                             style: const TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.w600),
                           ),
                         ),

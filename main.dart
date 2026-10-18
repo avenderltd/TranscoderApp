@@ -229,7 +229,21 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         buildCommand: (i, o) => '-y -i "$i" -vf "fps=15,scale=480:-1:flags=lanczos" "$o"',
       ),
     ],
-    "Subtitles & Transcribe": [
+    "Subtitles & Dubbing": [
+      PresetItem(
+        title: "AI Auto-Dub Video (Voiceover)",
+        subtitle: "1-Tap voice dubbing • Choose 15% or 0% original audio",
+        icon: Icons.record_voice_over_outlined,
+        extension: "mp4",
+        buildCommand: (i, o) => '',
+      ),
+      PresetItem(
+        title: "AI Auto-Dub + Burn Subtitles",
+        subtitle: "Dub voiceover AND burn subtitles together",
+        icon: Icons.spatial_audio_off_outlined,
+        extension: "mp4",
+        buildCommand: (i, o) => '',
+      ),
       PresetItem(
         title: "AI Auto-Subtitles (Burn-In)",
         subtitle: "Transcribe speech & auto-translate into 99 languages",
@@ -382,7 +396,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     return '$hrs:$mins:$secs,$ms';
   }
 
-  // Free keyless translation helper so ANY spoken language can be translated into ANY subtitle language
   Future<String> _translateTextFree(String text, String targetLang) async {
     if (targetLang == "same" || text.trim().isEmpty) return text;
     try {
@@ -403,7 +416,25 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     return text;
   }
 
-  Future<String?> _showSearchableLanguageDialog() async {
+  Future<bool> _downloadTtsSnippet(String text, String langCode, String savePath) async {
+    final String ttsLang = langCode == "same" ? "en" : langCode;
+    final String safeText = text.length > 190 ? text.substring(0, 190) : text;
+    try {
+      final url = Uri.parse(
+        'https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=$ttsLang&q=${Uri.encodeComponent(safeText)}',
+      );
+      final response = await http.get(url, headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+      });
+      if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
+        await File(savePath).writeAsBytes(response.bodyBytes);
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  Future<String?> _showSearchableLanguageDialog({String title = "Select Target Language"}) async {
     String searchQuery = "";
 
     return await showDialog<String>(
@@ -417,7 +448,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
             return AlertDialog(
               backgroundColor: const Color(0xFF1E1E1E),
-              title: const Text("Select Target Subtitle Language", style: TextStyle(color: Colors.tealAccent)),
+              title: Text(title, style: const TextStyle(color: Colors.tealAccent)),
               content: SizedBox(
                 width: double.maxFinite,
                 height: 400,
@@ -445,6 +476,91 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                             title: Text(entry.key, style: const TextStyle(color: Colors.white)),
                             trailing: Text(entry.value.toUpperCase(), style: const TextStyle(color: Colors.white38, fontSize: 12)),
                             onTap: () => Navigator.pop(context, entry.value),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // Specialized dialog for Dubbing that lets users toggle 15% original background audio vs 0% (no original audio)
+  Future<Map<String, dynamic>?> _showDubbingOptionsDialog() async {
+    String searchQuery = "";
+    bool keepBackgroundAudio = true;
+
+    return await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final filteredEntries = _worldLanguages.entries
+                .where((e) => e.key.toLowerCase().contains(searchQuery.toLowerCase()))
+                .toList();
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1E1E1E),
+              title: const Text("Dubbing Language & Audio", style: TextStyle(color: Colors.tealAccent)),
+              content: SizedBox(
+                width: double.maxFinite,
+                height: 440,
+                child: Column(
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF121212),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.white12),
+                      ),
+                      child: SwitchListTile(
+                        activeColor: Colors.tealAccent,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                        title: Text(
+                          keepBackgroundAudio ? "Original Audio: 15%" : "Original Audio: Muted (0%)",
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                        subtitle: Text(
+                          keepBackgroundAudio
+                              ? "Keeps faint background sound & effects"
+                              : "Completely removes original video audio",
+                          style: const TextStyle(color: Colors.white60, fontSize: 11),
+                        ),
+                        value: keepBackgroundAudio,
+                        onChanged: (val) => setModalState(() => keepBackgroundAudio = val),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: "Search 99 languages...",
+                        hintStyle: const TextStyle(color: Colors.white38),
+                        prefixIcon: const Icon(Icons.search, color: Colors.tealAccent),
+                        filled: true,
+                        fillColor: const Color(0xFF121212),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onChanged: (val) => setModalState(() => searchQuery = val),
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: filteredEntries.length,
+                        itemBuilder: (context, index) {
+                          final entry = filteredEntries[index];
+                          return ListTile(
+                            title: Text(entry.key, style: const TextStyle(color: Colors.white)),
+                            trailing: Text(entry.value.toUpperCase(), style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                            onTap: () => Navigator.pop(context, {
+                              'lang': entry.value,
+                              'keepBg': keepBackgroundAudio,
+                            }),
                           );
                         },
                       ),
@@ -493,8 +609,162 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     });
   }
 
+  Future<void> _handleAiAutoDubbing({required bool alsoBurnSubtitles}) async {
+    final dubChoice = await _showDubbingOptionsDialog();
+    if (dubChoice == null) return;
+
+    final String targetLangCode = dubChoice['lang'];
+    final bool keepBackgroundAudio = dubChoice['keepBg'];
+
+    setState(() {
+      _isProcessing = true;
+      _statusMessage = "Step 1/4: Extracting speech audio for AI...";
+      _lastOutputPath = null;
+    });
+
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final tempWavPath = '${tempDir.path}/whisper_dub_input.wav';
+      final tempSrtPath = '${tempDir.path}/whisper_dub_subs.srt';
+
+      final wavCmd = '-y -i "${_inputFile!.path}" -vn -ar 16000 -ac 1 -c:a pcm_s16le "$tempWavPath"';
+      final wavSession = await FFmpegKit.execute(wavCmd);
+      if (!ReturnCode.isSuccess(await wavSession.getReturnCode())) {
+        setState(() {
+          _isProcessing = false;
+          _statusMessage = "Failed to extract audio from video.";
+        });
+        return;
+      }
+
+      setState(() {
+        _statusMessage = "Step 2/4: Recognizing speech with Offline Whisper AI...";
+      });
+
+      final whisper = Whisper(
+        model: WhisperModel.base,
+        downloadHost: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main",
+      );
+
+      final res = await whisper.transcribe(
+        transcribeRequest: TranscribeRequest(
+          audio: tempWavPath,
+          language: "auto",
+          isTranslate: false,
+          isNoTimestamps: false,
+          splitOnWord: false,
+        ),
+      );
+
+      final segments = res.segments;
+      if (segments == null || segments.isEmpty) {
+        setState(() {
+          _isProcessing = false;
+          _statusMessage = "No spoken dialogue detected to dub.";
+        });
+        return;
+      }
+
+      setState(() {
+        _statusMessage = "Step 3/4: Translating & generating ${segments.length} voiceover clips...";
+      });
+
+      final StringBuffer srtBuffer = StringBuffer();
+      final List<String> ttsFiles = [];
+      final List<int> delaysMs = [];
+
+      for (int i = 0; i < segments.length; i++) {
+        final seg = segments[i];
+        final originalText = seg.text.trim();
+        if (originalText.isEmpty) continue;
+
+        final translatedLine = await _translateTextFree(originalText, targetLangCode);
+
+        srtBuffer.writeln('${i + 1}');
+        srtBuffer.writeln('${_formatDurationToSrt(seg.fromTs)} --> ${_formatDurationToSrt(seg.toTs)}');
+        srtBuffer.writeln(translatedLine);
+        srtBuffer.writeln();
+
+        final snippetPath = '${tempDir.path}/tts_seg_$i.mp3';
+        final ok = await _downloadTtsSnippet(translatedLine, targetLangCode, snippetPath);
+        if (ok) {
+          ttsFiles.add(snippetPath);
+          delaysMs.add(seg.fromTs.inMilliseconds);
+        }
+      }
+
+      if (ttsFiles.isEmpty) {
+        setState(() {
+          _isProcessing = false;
+          _statusMessage = "Failed to generate dubbing audio clips. Check internet connection.";
+        });
+        return;
+      }
+
+      await File(tempSrtPath).writeAsString(srtBuffer.toString());
+
+      setState(() {
+        _statusMessage = keepBackgroundAudio
+            ? "Step 4/4: Mixing voiceover with 15% original audio..."
+            : "Step 4/4: Mixing pure voiceover (0% original audio)...";
+      });
+
+      final outVideoPath = await _getOutputFilePath(
+        alsoBurnSubtitles ? "Dubbed_Subtitled_$targetLangCode" : "Dubbed_$targetLangCode",
+        "mp4",
+      );
+
+      // Uses 0.15 (15%) if switch is ON, or 0.0 (completely muted) if switch is OFF
+      final String bgVolume = keepBackgroundAudio ? "0.15" : "0.0";
+      final StringBuffer inputsArg = StringBuffer('-y -i "${_inputFile!.path}" ');
+      final StringBuffer filterComplex = StringBuffer('[0:a]volume=$bgVolume[orig];');
+      final StringBuffer mixInputs = StringBuffer('[orig]');
+
+      for (int i = 0; i < ttsFiles.length; i++) {
+        inputsArg.write('-i "${ttsFiles[i]}" ');
+        final int inputIdx = i + 1;
+        final int delay = delaysMs[i];
+        filterComplex.write('[$inputIdx:a]adelay=$delay|$delay,volume=1.8[a$i];');
+        mixInputs.write('[a$i]');
+      }
+
+      final int totalAudioStreams = ttsFiles.length + 1;
+      filterComplex.write('${mixInputs.toString()}amix=inputs=$totalAudioStreams:duration=first:dropout_transition=0:normalize=0[aout]');
+
+      String videoPart = '-map 0:v -c:v copy';
+      if (alsoBurnSubtitles) {
+        videoPart = '-vf "subtitles=$tempSrtPath:fontsdir=/system/fonts:force_style=\'FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22';
+      }
+
+      final String dubCmd = '${inputsArg.toString()}-filter_complex "${filterComplex.toString()}" $videoPart -map "[aout]" -c:a aac -b:a 192k "$outVideoPath"';
+
+      final dubSession = await FFmpegKit.execute(dubCmd);
+      final dubCode = await dubSession.getReturnCode();
+
+      for (final f in ttsFiles) {
+        final fileObj = File(f);
+        if (await fileObj.exists()) await fileObj.delete();
+      }
+
+      setState(() {
+        _isProcessing = false;
+        if (ReturnCode.isSuccess(dubCode)) {
+          _statusMessage = "Success! Dubbed Video saved to Downloads";
+          _lastOutputPath = outVideoPath;
+        } else {
+          _statusMessage = "Dubbing mix failed (Code: ${dubCode?.getValue()})";
+        }
+      });
+    } catch (e) {
+      setState(() {
+        _isProcessing = false;
+        _statusMessage = "Dubbing Error: $e";
+      });
+    }
+  }
+
   Future<void> _handleOfflineWhisperSubtitles({required bool burnIntoVideo}) async {
-    final targetLangCode = await _showSearchableLanguageDialog();
+    final targetLangCode = await _showSearchableLanguageDialog(title: "Select Target Subtitle Language");
     if (targetLangCode == null) return;
 
     setState(() {
@@ -527,7 +797,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         downloadHost: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main",
       );
 
-      // CRITICAL FIX: Always use language: "auto" so Whisper accurately transcribes the actual spoken language in the video instead of hallucinating!
       final res = await whisper.transcribe(
         transcribeRequest: TranscribeRequest(
           audio: tempWavPath,
@@ -620,6 +889,14 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       return;
     }
 
+    if (preset.title == "AI Auto-Dub Video (Voiceover)") {
+      await _handleAiAutoDubbing(alsoBurnSubtitles: false);
+      return;
+    }
+    if (preset.title == "AI Auto-Dub + Burn Subtitles") {
+      await _handleAiAutoDubbing(alsoBurnSubtitles: true);
+      return;
+    }
     if (preset.title == "AI Auto-Subtitles (Burn-In)") {
       await _handleOfflineWhisperSubtitles(burnIntoVideo: true);
       return;

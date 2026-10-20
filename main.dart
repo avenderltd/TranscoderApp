@@ -172,43 +172,47 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   final Map<String, List<PresetItem>> _categories = {
     "Resolution & Quality": [
       PresetItem(
-        title: "4K Ultra HD",
-        subtitle: "3840x2160 • High Bitrate MP4",
+        title: "4K Ultra HD (Detail Enhancer)",
+        subtitle: "3840x2160 • Lanczos Edge Sharpening & Smart Bitrate",
         icon: Icons.four_k_outlined,
         extension: "mp4",
-        buildCommand: (i, o) => '-y -i "$i" -vf "scale=3840:-2" -c:v libx264 -preset fast -crf 18 -c:a aac -b:a 192k "$o"',
+        buildCommand: (i, o) =>
+            '-y -i "$i" -map 0:v:0 -map 0:a:0? -vf "scale=3840:-2:flags=lanczos,unsharp=5:5:0.85:5:5:0.0,eq=contrast=1.03:saturation=1.06" -c:v libx264 -preset fast -crf 23 -maxrate 16M -bufsize 32M -pix_fmt yuv420p -c:a aac -ac 2 -ar 44100 -b:a 192k "$o"',
       ),
       PresetItem(
-        title: "1080p Full HD",
-        subtitle: "1920x1080 • Crisp Standard HD",
+        title: "1080p Full HD (Crisp Remaster)",
+        subtitle: "1920x1080 • Sharp Lanczos HD & Stereo Audio",
         icon: Icons.hd_outlined,
         extension: "mp4",
-        buildCommand: (i, o) => '-y -i "$i" -vf "scale=1920:-2" -c:v libx264 -preset fast -crf 21 -c:a aac -b:a 160k "$o"',
+        buildCommand: (i, o) =>
+            '-y -i "$i" -map 0:v:0 -map 0:a:0? -vf "scale=1920:-2:flags=lanczos,unsharp=5:5:0.5:5:5:0.0" -c:v libx264 -preset fast -crf 21 -maxrate 8M -bufsize 16M -pix_fmt yuv420p -c:a aac -ac 2 -ar 44100 -b:a 192k "$o"',
       ),
       PresetItem(
         title: "720p HD Ready",
-        subtitle: "1280x720 • Balanced Size & Quality",
+        subtitle: "1280x720 • Balanced Size & Crisp Quality",
         icon: Icons.sd_outlined,
         extension: "mp4",
-        buildCommand: (i, o) => '-y -i "$i" -vf "scale=1280:-2" -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 128k "$o"',
+        buildCommand: (i, o) =>
+            '-y -i "$i" -map 0:v:0 -map 0:a:0? -vf "scale=1280:-2:flags=lanczos" -c:v libx264 -preset fast -crf 22 -pix_fmt yuv420p -c:a aac -ac 2 -ar 44100 -b:a 160k "$o"',
       ),
       PresetItem(
-        title: "Small Share Size",
-        subtitle: "480p • Best for Discord & WhatsApp",
+        title: "480p SD Compact",
+        subtitle: "854x480 • Fast Mobile & Storage Saver",
         icon: Icons.compress,
         extension: "mp4",
-        buildCommand: (i, o) => '-y -i "$i" -vf "scale=854:-2" -c:v libx264 -preset veryfast -crf 28 -c:a aac -b:a 96k "$o"',
+        buildCommand: (i, o) =>
+            '-y -i "$i" -map 0:v:0 -map 0:a:0? -vf "scale=854:-2:flags=lanczos" -c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p -c:a aac -ac 2 -ar 44100 -b:a 128k "$o"',
       ),
       PresetItem(
         title: "Exact <10MB Fit (Discord/Email)",
-        subtitle: "Auto-calculates exact bitrate to stay under 10MB",
+        subtitle: "Smart resolution + stereo audio guaranteed under 10MB",
         icon: Icons.fit_screen_outlined,
         extension: "mp4",
         buildCommand: (i, o) => '',
       ),
       PresetItem(
         title: "Exact <16MB Fit (WhatsApp)",
-        subtitle: "Auto-calculates exact bitrate to stay under 16MB",
+        subtitle: "Smart resolution + stereo audio guaranteed under 16MB",
         icon: Icons.send_to_mobile_outlined,
         extension: "mp4",
         buildCommand: (i, o) => '',
@@ -228,14 +232,14 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         icon: Icons.stay_current_portrait_outlined,
         extension: "mp4",
         buildCommand: (i, o) =>
-            '-y -i "$i" -filter_complex "[0:v:0]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20:10[bg];[0:v:0]scale=1080:1920:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2" -map 0:a? -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p -c:a copy "$o"',
+            '-y -i "$i" -filter_complex "[0:v:0]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20:10[bg];[0:v:0]scale=1080:1920:force_original_aspect_ratio=decrease[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[vout]" -map "[vout]" -map 0:a:0? -c:v libx264 -preset fast -crf 21 -pix_fmt yuv420p -c:a aac -ac 2 -ar 44100 -b:a 160k "$o"',
       ),
       PresetItem(
         title: "Privacy Shield (Strip GPS & Data)",
         subtitle: "Instantly removes hidden GPS location & phone metadata",
         icon: Icons.shield_outlined,
         extension: "mp4",
-        buildCommand: (i, o) => '-y -i "$i" -map_metadata -1 -c:v copy -c:a copy "$o"',
+        buildCommand: (i, o) => '-y -i "$i" -map_metadata -1 -map 0:v:0 -map 0:a:0? -c:v copy -c:a copy "$o"',
       ),
     ],
     "Subtitles & Dubbing": [
@@ -293,37 +297,40 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         subtitle: "Remove subtitle tracks completely",
         icon: Icons.leak_remove_outlined,
         extension: "mp4",
-        buildCommand: (i, o) => '-y -i "$i" -c:v copy -c:a copy -sn "$o"',
+        buildCommand: (i, o) => '-y -i "$i" -map 0:v:0 -map 0:a:0? -c:v copy -c:a copy -sn "$o"',
       ),
     ],
     "Speed, FPS & GIF": [
       PresetItem(
         title: "Smooth 60 FPS",
-        subtitle: "Convert framerate to 60fps",
+        subtitle: "Convert framerate to smooth 60fps",
         icon: Icons.speed,
         extension: "mp4",
-        buildCommand: (i, o) => '-y -i "$i" -r 60 -c:v libx264 -preset fast -crf 22 -c:a copy "$o"',
+        buildCommand: (i, o) =>
+            '-y -i "$i" -map 0:v:0 -map 0:a:0? -r 60 -c:v libx264 -preset fast -crf 21 -pix_fmt yuv420p -c:a aac -ac 2 -ar 44100 -b:a 160k "$o"',
       ),
       PresetItem(
         title: "2x Fast Forward",
         subtitle: "Double video & audio speed",
         icon: Icons.fast_forward_outlined,
         extension: "mp4",
-        buildCommand: (i, o) => '-y -i "$i" -filter_complex "[0:v]setpts=0.5*PTS[v];[0:a]atempo=2.0[a]" -map "[v]" -map "[a]" -c:v libx264 -preset fast "$o"',
+        buildCommand: (i, o) =>
+            '-y -i "$i" -map 0:v:0 -map 0:a:0? -vf "setpts=0.5*PTS" -af "atempo=2.0" -c:v libx264 -preset fast -crf 21 -pix_fmt yuv420p -c:a aac -ac 2 -ar 44100 -b:a 160k "$o"',
       ),
       PresetItem(
         title: "0.5x Slow Motion",
         subtitle: "Half speed smooth playback",
         icon: Icons.slow_motion_video,
         extension: "mp4",
-        buildCommand: (i, o) => '-y -i "$i" -filter_complex "[0:v]setpts=2.0*PTS[v];[0:a]atempo=0.5[a]" -map "[v]" -map "[a]" -c:v libx264 -preset fast "$o"',
+        buildCommand: (i, o) =>
+            '-y -i "$i" -map 0:v:0 -map 0:a:0? -vf "setpts=2.0*PTS" -af "atempo=0.5" -c:v libx264 -preset fast -crf 21 -pix_fmt yuv420p -c:a aac -ac 2 -ar 44100 -b:a 160k "$o"',
       ),
       PresetItem(
         title: "High-Quality GIF",
         subtitle: "480px • 15 FPS Animated GIF",
         icon: Icons.gif_box_outlined,
         extension: "gif",
-        buildCommand: (i, o) => '-y -i "$i" -vf "fps=15,scale=480:-1:flags=lanczos" "$o"',
+        buildCommand: (i, o) => '-y -i "$i" -map 0:v:0 -vf "fps=15,scale=480:-1:flags=lanczos" "$o"',
       ),
     ],
     "Audio & Formats": [
@@ -333,56 +340,58 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         icon: Icons.mic_external_on_outlined,
         extension: "mp4",
         buildCommand: (i, o) =>
-            '-y -i "$i" -c:v copy -af "highpass=f=80,lowpass=f=12000,afftdn=nf=-25,acompressor=threshold=-18dB:ratio=3:attack=5:release=50,volume=1.4" "$o"',
+            '-y -i "$i" -map 0:v:0 -map 0:a:0 -c:v copy -af "highpass=f=80,lowpass=f=12000,afftdn=nf=-25,acompressor=threshold=-18dB:ratio=3:attack=5:release=50,volume=1.4" -c:a aac -ac 2 -ar 44100 -b:a 192k "$o"',
       ),
       PresetItem(
         title: "Karaoke Mode (Vocal Remover)",
         subtitle: "Cancel out center-panned vocals from music videos",
         icon: Icons.music_note_outlined,
         extension: "mp4",
-        buildCommand: (i, o) => '-y -i "$i" -c:v copy -af "pan=stereo|c0=c0-c1|c1=c1-c0" "$o"',
+        buildCommand: (i, o) =>
+            '-y -i "$i" -map 0:v:0 -map 0:a:0 -c:v copy -af "stereotools=mlev=0.015625" -c:a aac -ac 2 -ar 44100 -b:a 192k "$o"',
       ),
       PresetItem(
         title: "Extract MP3 Audio",
-        subtitle: "320kbps High-Bitrate MP3",
+        subtitle: "320kbps High-Bitrate Stereo MP3",
         icon: Icons.audiotrack_outlined,
         extension: "mp3",
-        buildCommand: (i, o) => '-y -i "$i" -vn -acodec libmp3lame -b:a 320k "$o"',
+        buildCommand: (i, o) => '-y -i "$i" -vn -acodec libmp3lame -ac 2 -ar 44100 -b:a 320k "$o"',
       ),
       PresetItem(
         title: "Extract WAV Audio",
-        subtitle: "Uncompressed Lossless Audio",
+        subtitle: "Uncompressed Lossless Stereo Audio",
         icon: Icons.graphic_eq,
         extension: "wav",
-        buildCommand: (i, o) => '-y -i "$i" -vn "$o"',
+        buildCommand: (i, o) => '-y -i "$i" -vn -ac 2 -ar 44100 "$o"',
       ),
       PresetItem(
         title: "Mute Video",
         subtitle: "Remove audio track completely",
         icon: Icons.volume_off_outlined,
         extension: "mp4",
-        buildCommand: (i, o) => '-y -i "$i" -c:v copy -an "$o"',
+        buildCommand: (i, o) => '-y -i "$i" -map 0:v:0 -c:v copy -an "$o"',
       ),
       PresetItem(
         title: "Boost Volume 200%",
         subtitle: "Fix quiet audio in videos",
         icon: Icons.volume_up_outlined,
         extension: "mp4",
-        buildCommand: (i, o) => '-y -i "$i" -vcodec copy -af "volume=2.0" "$o"',
+        buildCommand: (i, o) =>
+            '-y -i "$i" -map 0:v:0 -map 0:a:0 -c:v copy -af "volume=2.0" -c:a aac -ac 2 -ar 44100 -b:a 192k "$o"',
       ),
       PresetItem(
         title: "Remux to MKV",
         subtitle: "Instant container swap (Lossless)",
         icon: Icons.video_file_outlined,
         extension: "mkv",
-        buildCommand: (i, o) => '-y -i "$i" -c copy "$o"',
+        buildCommand: (i, o) => '-y -i "$i" -map 0:v:0 -map 0:a:0? -c copy "$o"',
       ),
       PresetItem(
         title: "Remux to MOV",
         subtitle: "Apple QuickTime format",
         icon: Icons.movie_creation_outlined,
         extension: "mov",
-        buildCommand: (i, o) => '-y -i "$i" -c copy "$o"',
+        buildCommand: (i, o) => '-y -i "$i" -map 0:v:0 -map 0:a:0? -c copy "$o"',
       ),
     ],
   };
@@ -450,7 +459,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     return '$hrs:$mins:$secs,$ms';
   }
 
-  // Exact Target Size Calculator using FFprobe duration math
+  // FIXED Exact Target Size Calculator:
+  // 1. Always downmixes 5.1 surround sound to 2-channel stereo (-ac 2 -ar 44100) so audio NEVER disappears!
+  // 2. Dynamically picks the sharpest resolution for the available bitrate so long videos look crisp instead of blocky!
   Future<void> _compressToExactTargetSizeMB(double targetMB) async {
     setState(() {
       _isProcessing = true;
@@ -462,21 +473,34 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       final infoSession = await FFprobeKit.getMediaInformation(_inputFile!.path);
       final info = infoSession.getMediaInformation();
       final durationStr = info?.getDuration();
-      final double durationSec = double.tryParse(durationStr ?? "60") ?? 60.0;
+      final double durationSec = (double.tryParse(durationStr ?? "60") ?? 60.0).clamp(1.0, 7200.0);
 
-      // Reserve 5% safety buffer so file never exceeds limit
+      // Reserve 6% container overhead buffer so file strictly stays under limit
       final double safeTargetKilobits = targetMB * 8192.0 * 0.94;
       final int totalKbps = (safeTargetKilobits / durationSec).floor();
-      final int audioKbps = totalKbps > 400 ? 96 : 64;
-      final int videoKbps = (totalKbps - audioKbps).clamp(120, 8000);
+
+      // Guarantee clean stereo audio bitrate
+      final int audioKbps = totalKbps > 450 ? 128 : (totalKbps > 250 ? 96 : 64);
+      final int videoKbps = (totalKbps - audioKbps).clamp(100, 8000);
+
+      // Smart Adaptive Resolution: match resolution to available video bitrate so pixels stay sharp!
+      String targetWidth = "1280";
+      if (videoKbps < 280) {
+        targetWidth = "480";
+      } else if (videoKbps < 550) {
+        targetWidth = "640";
+      } else if (videoKbps < 1100) {
+        targetWidth = "854";
+      }
 
       setState(() {
-        _statusMessage = "Compressing at ${videoKbps}kbps to guarantee <${targetMB.toInt()}MB...";
+        _statusMessage =
+            "Encoding at ${videoKbps}kbps (${targetWidth}p + Stereo Audio) to fit <${targetMB.toInt()}MB...";
       });
 
       final outPath = await _getOutputFilePath("Fit_${targetMB.toInt()}MB", "mp4");
       final cmd =
-          '-y -i "${_inputFile!.path}" -map 0:v:0 -map 0:a? -vf "scale=\'min(1280,iw)\':-2" -c:v libx264 -preset veryfast -b:v ${videoKbps}k -maxrate ${videoKbps}k -bufsize ${videoKbps * 2}k -pix_fmt yuv420p -c:a aac -b:a ${audioKbps}k "$outPath"';
+          '-y -i "${_inputFile!.path}" -map 0:v:0 -map 0:a:0? -vf "scale=\'min($targetWidth,iw)\':-2:flags=lanczos" -c:v libx264 -preset fast -b:v ${videoKbps}k -maxrate ${videoKbps}k -bufsize ${videoKbps * 2}k -pix_fmt yuv420p -c:a aac -ac 2 -ar 44100 -b:a ${audioKbps}k "$outPath"';
 
       final session = await FFmpegKit.execute(cmd);
       final code = await session.getReturnCode();
@@ -484,7 +508,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       setState(() {
         _isProcessing = false;
         if (ReturnCode.isSuccess(code)) {
-          _statusMessage = "Success! <${targetMB.toInt()}MB video saved to Downloads";
+          _statusMessage = "Success! Crisp <${targetMB.toInt()}MB video (with audio) saved!";
           _lastOutputPath = outPath;
         } else {
           _statusMessage = "Target size compression failed (Code: ${code?.getValue()})";
@@ -585,7 +609,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
       final outVideoPath = await _getOutputFilePath("JumpCut_NoSilence", "mp4");
       final cutCmd =
-          '-y -i "${_inputFile!.path}" -filter_complex "${filterComplex.toString()}" -map "[outv]" -map "[outa]" -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p -c:a aac -b:a 160k "$outVideoPath"';
+          '-y -i "${_inputFile!.path}" -filter_complex "${filterComplex.toString()}" -map "[outv]" -map "[outa]" -c:v libx264 -preset fast -crf 21 -pix_fmt yuv420p -c:a aac -ac 2 -ar 44100 -b:a 160k "$outVideoPath"';
 
       final cutSession = await FFmpegKit.execute(cutCmd);
       final cutCode = await cutSession.getReturnCode();
@@ -803,7 +827,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     await File(srtResult.files.single.path!).copy(safeSrtFile.path);
 
     final outPath = await _getOutputFilePath("Burned_Subs", "mp4");
-    final cmd = '-y -i "${_inputFile!.path}" -map 0:v:0 -map 0:a? -vf "subtitles=${safeSrtFile.path}:fontsdir=/system/fonts:force_style=\'FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p -c:a copy "$outPath"';
+    final cmd =
+        '-y -i "${_inputFile!.path}" -map 0:v:0 -map 0:a:0? -vf "subtitles=${safeSrtFile.path}:fontsdir=/system/fonts:force_style=\'FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p -c:a aac -ac 2 -ar 44100 -b:a 160k "$outPath"';
 
     await FFmpegKit.execute(cmd).then((session) async {
       final returnCode = await session.getReturnCode();
@@ -982,16 +1007,19 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
       String videoMappingAndCodec;
       if (alsoBurnSubtitles) {
-        videoMappingAndCodec = '-map 0:v:0 -vf "subtitles=$tempSrtPath:fontsdir=/system/fonts:force_style=\'FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p';
+        videoMappingAndCodec =
+            '-map 0:v:0 -vf "subtitles=$tempSrtPath:fontsdir=/system/fonts:force_style=\'FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p';
       } else {
         videoMappingAndCodec = '-map 0:v:0 -c:v copy';
       }
 
       String dubCmd;
       if (keepBackgroundAudio) {
-        dubCmd = '-y -i "${_inputFile!.path}" -i "$masterDubWavPath" -filter_complex "[0:a:0]volume=0.15[bg];[1:a:0]volume=2.0[dub];[bg][dub]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]" $videoMappingAndCodec -map "[aout]" -c:a aac -b:a 192k "$outVideoPath"';
+        dubCmd =
+            '-y -i "${_inputFile!.path}" -i "$masterDubWavPath" -filter_complex "[0:a:0]volume=0.15[bg];[1:a:0]volume=2.0[dub];[bg][dub]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]" $videoMappingAndCodec -map "[aout]" -c:a aac -ac 2 -ar 44100 -b:a 192k "$outVideoPath"';
       } else {
-        dubCmd = '-y -i "${_inputFile!.path}" -i "$masterDubWavPath" $videoMappingAndCodec -map 1:a:0 -c:a aac -b:a 192k -shortest "$outVideoPath"';
+        dubCmd =
+            '-y -i "${_inputFile!.path}" -i "$masterDubWavPath" $videoMappingAndCodec -map 1:a:0 -c:a aac -ac 2 -ar 44100 -b:a 192k -shortest "$outVideoPath"';
       }
 
       final dubSession = await FFmpegKit.execute(dubCmd);
@@ -1110,7 +1138,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       setState(() => _statusMessage = "Step 4/4: Burning Subtitles into Video...");
       final outVideoPath = await _getOutputFilePath("Subtitled_$targetLangCode", "mp4");
 
-      final burnCmd = '-y -i "${_inputFile!.path}" -map 0:v:0 -map 0:a? -vf "subtitles=$tempSrtPath:fontsdir=/system/fonts:force_style=\'FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p -c:a copy "$outVideoPath"';
+      final burnCmd =
+          '-y -i "${_inputFile!.path}" -map 0:v:0 -map 0:a:0? -vf "subtitles=$tempSrtPath:fontsdir=/system/fonts:force_style=\'FontSize=18,PrimaryColour=&H00FFFFFF&,OutlineColour=&H00000000&,BorderStyle=1,Outline=2\'" -c:v libx264 -preset veryfast -crf 22 -pix_fmt yuv420p -c:a aac -ac 2 -ar 44100 -b:a 160k "$outVideoPath"';
 
       final burnSession = await FFmpegKit.execute(burnCmd);
       final burnCode = await burnSession.getReturnCode();

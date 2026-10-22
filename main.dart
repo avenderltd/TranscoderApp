@@ -203,7 +203,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     ChatMessage(
       sender: "ai",
       text:
-          "Hello! مرحباً! Hallo! Bonjour! 👋\n\nWhen 'Google & Web Search' is ON, I search live Google News, DuckDuckGo web results, live satellite weather, and multilingual knowledge bases in any language! Ask me anything or attach a photo/video with 📷.",
+          "Hello! مرحباً! Hallo! Bonjour! 👋\n\nAsk me anything in Arabic, English, German, French, or any language! When 'Google & Web' is ON, I can check live weather for any country/city, search the web, write code, or analyze media attached with 📷.",
     )
   ];
 
@@ -2102,26 +2102,66 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     }
   }
 
-  // ============================================================================
-  // 4-LAYER FULL WEB SEARCH ENGINE (Google Index + DuckDuckGo + Weather + Wiki)
-  // ============================================================================
-  Future<String> _fetchFullGoogleAndWebSearchContext(
+  // Country-to-Capital & Coordinates Smart Resolver (Prevents "Germany" from matching a tiny town in Ohio, USA!)
+  Map<String, dynamic>? _resolveKnownCountryOrRegion(String locationQuery) {
+    final String q = locationQuery.toLowerCase().trim();
+    final Map<String, Map<String, dynamic>> knownCountries = {
+      'germany': {'name': 'Germany (Berlin / Central)', 'lat': 51.51, 'lon': 7.46},
+      'deutschland': {'name': 'Deutschland', 'lat': 51.51, 'lon': 7.46},
+      'ألمانيا': {'name': 'ألمانيا (Germany)', 'lat': 51.51, 'lon': 7.46},
+      'المانيا': {'name': 'ألمانيا (Germany)', 'lat': 51.51, 'lon': 7.46},
+      'france': {'name': 'France (Paris)', 'lat': 48.85, 'lon': 2.35},
+      'فرنسا': {'name': 'فرنسا (France)', 'lat': 48.85, 'lon': 2.35},
+      'uk': {'name': 'United Kingdom (London)', 'lat': 51.50, 'lon': -0.12},
+      'united kingdom': {'name': 'United Kingdom (London)', 'lat': 51.50, 'lon': -0.12},
+      'england': {'name': 'England (London)', 'lat': 51.50, 'lon': -0.12},
+      'بريطانيا': {'name': 'بريطانيا (UK)', 'lat': 51.50, 'lon': -0.12},
+      'usa': {'name': 'United States (New York)', 'lat': 40.71, 'lon': -74.00},
+      'united states': {'name': 'United States', 'lat': 40.71, 'lon': -74.00},
+      'أمريكا': {'name': 'الولايات المتحدة (USA)', 'lat': 40.71, 'lon': -74.00},
+      'turkey': {'name': 'Turkey (Istanbul)', 'lat': 41.00, 'lon': 28.97},
+      'تركيا': {'name': 'تركيا (Turkey)', 'lat': 41.00, 'lon': 28.97},
+      'spain': {'name': 'Spain (Madrid)', 'lat': 40.41, 'lon': -3.70},
+      'إسبانيا': {'name': 'إسبانيا (Spain)', 'lat': 40.41, 'lon': -3.70},
+      'italy': {'name': 'Italy (Rome)', 'lat': 41.90, 'lon': 12.49},
+      'إيطاليا': {'name': 'إيطاليا (Italy)', 'lat': 41.90, 'lon': 12.49},
+      'lebanon': {'name': 'Lebanon (Beirut)', 'lat': 33.89, 'lon': 35.50},
+      'لبنان': {'name': 'لبنان ( بيروت )', 'lat': 33.89, 'lon': 35.50},
+      'syria': {'name': 'Syria (Damascus)', 'lat': 33.51, 'lon': 36.29},
+      'سوريا': {'name': 'سوريا (دمشق)', 'lat': 33.51, 'lon': 36.29},
+      'egypt': {'name': 'Egypt (Cairo)', 'lat': 30.04, 'lon': 31.23},
+      'مصر': {'name': 'مصر (القاهرة)', 'lat': 30.04, 'lon': 31.23},
+      'saudi arabia': {'name': 'Saudi Arabia (Riyadh)', 'lat': 24.71, 'lon': 46.67},
+      'السعودية': {'name': 'السعودية (الرياض)', 'lat': 24.71, 'lon': 46.67},
+      'uae': {'name': 'UAE (Dubai)', 'lat': 25.20, 'lon': 55.27},
+      'الإمارات': {'name': 'الإمارات (دبي)', 'lat': 25.20, 'lon': 55.27},
+    };
+
+    for (final entry in knownCountries.entries) {
+      if (q == entry.key || q.contains(entry.key)) {
+        return entry.value;
+      }
+    }
+    return null;
+  }
+
+  // FIXED SMART WEATHER & WEB SEARCH AGGREGATOR:
+  // 1. If it's a weather question, it ONLY fetches accurate weather (using highest-population city/country match so "Germany" never matches a village in Ohio!) and does NOT pollute with random Wikipedia articles!
+  // 2. If it's a general web search, it fetches the top 3 cleanest snippets so the AI never chokes or dumps raw text!
+  Future<Map<String, String>> _fetchSmartWebOrWeatherContext(
     String rawQuery,
     String englishQuery,
     String detectedLang,
   ) async {
-    final List<String> collectedWebFacts = [];
     final String lowerEn = englishQuery.toLowerCase();
     final String lowerRaw = rawQuery.toLowerCase();
 
-    // LAYER 1: Live Satellite Weather (if asking about weather/temperature in ANY language)
     final bool isWeatherQuery = lowerEn.contains("weather") ||
         lowerEn.contains("temperature") ||
         lowerEn.contains("forecast") ||
         lowerEn.contains("rain") ||
-        lowerEn.contains("cold") ||
-        lowerEn.contains("hot") ||
         lowerRaw.contains("طقس") ||
+        lowerRaw.contains("الطقس") ||
         lowerRaw.contains("جو") ||
         lowerRaw.contains("حرارة") ||
         lowerRaw.contains("wetter") ||
@@ -2135,19 +2175,27 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       final match = inMatch.firstMatch(englishQuery);
       if (match != null && match.group(1) != null) {
         targetLocation = match.group(1)!
-            .replaceAll(RegExp(r'\b(today|now|tomorrow|right now|currently|please)\b', caseSensitive: false), '')
+            .replaceAll(RegExp(r'\b(today|now|tomorrow|right now|currently|please|the)\b', caseSensitive: false), '')
+            .replaceAll(RegExp(r'[^\w\s]'), '')
             .trim();
       }
 
       try {
         double lat = 51.61;
         double lon = 7.20;
-        String resolvedPlaceName = targetLocation.isNotEmpty ? targetLocation : "Local Area";
+        String resolvedPlaceName = targetLocation.isNotEmpty ? targetLocation : "Germany";
 
-        if (targetLocation.isNotEmpty) {
+        // First check if the user named a known country (like Germany / ألمانيا) so it never picks a US town!
+        final knownCountry = _resolveKnownCountryOrRegion(targetLocation.isNotEmpty ? targetLocation : rawQuery);
+        if (knownCountry != null) {
+          lat = knownCountry['lat'];
+          lon = knownCountry['lon'];
+          resolvedPlaceName = knownCountry['name'];
+        } else if (targetLocation.isNotEmpty) {
+          // Fetch top 10 matches and pick the one with the LARGEST population!
           final geoUri = Uri.https('geocoding-api.open-meteo.com', '/v1/search', {
             'name': targetLocation,
-            'count': '1',
+            'count': '10',
             'language': detectedLang,
             'format': 'json',
           });
@@ -2156,10 +2204,20 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             final geoData = jsonDecode(utf8.decode(geoResp.bodyBytes));
             final List? results = geoData['results'];
             if (results != null && results.isNotEmpty) {
-              lat = (results[0]['latitude'] as num).toDouble();
-              lon = (results[0]['longitude'] as num).toDouble();
-              final String cName = results[0]['name'] ?? targetLocation;
-              final String country = results[0]['country'] ?? "";
+              Map<String, dynamic> bestMatch = results[0];
+              int maxPop = (bestMatch['population'] as int?) ?? 0;
+              for (final r in results) {
+                final int pop = (r['population'] as int?) ?? 0;
+                final String fCode = (r['feature_code'] ?? '').toString();
+                if (fCode.startsWith('PPLC') || fCode.startsWith('PCLI') || pop > maxPop) {
+                  bestMatch = r;
+                  if (pop > maxPop) maxPop = pop;
+                }
+              }
+              lat = (bestMatch['latitude'] as num).toDouble();
+              lon = (bestMatch['longitude'] as num).toDouble();
+              final String cName = bestMatch['name'] ?? targetLocation;
+              final String country = bestMatch['country'] ?? "";
               resolvedPlaceName = country.isNotEmpty ? "$cName, $country" : cName;
             }
           }
@@ -2169,105 +2227,91 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           'latitude': lat.toString(),
           'longitude': lon.toString(),
           'current': 'temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m',
+          'daily': 'temperature_2m_max,temperature_2m_min',
+          'timezone': 'auto',
         });
         final wResp = await http.get(weatherUri).timeout(const Duration(seconds: 4));
         if (wResp.statusCode == 200) {
           final wData = jsonDecode(wResp.body);
           final cur = wData['current'];
+          final daily = wData['daily'];
           if (cur != null) {
-            collectedWebFacts.add(
-              "Live Satellite Weather for $resolvedPlaceName: Temperature ${cur['temperature_2m']}°C (Feels like ${cur['apparent_temperature']}°C), Humidity ${cur['relative_humidity_2m']}%, Wind ${cur['wind_speed_10m']} km/h",
-            );
+            final temp = cur['temperature_2m'];
+            final feels = cur['apparent_temperature'];
+            final hum = cur['relative_humidity_2m'];
+            final wind = cur['wind_speed_10m'];
+            final maxT = (daily?['temperature_2m_max'] as List?)?.first ?? temp;
+            final minT = (daily?['temperature_2m_min'] as List?)?.first ?? temp;
+
+            final String cleanWeatherSummaryEn =
+                "🌤️ Live Weather in $resolvedPlaceName:\n"
+                "• Current Temperature: ${temp}°C (Feels like ${feels}°C)\n"
+                "• Today's High / Low: ${maxT}°C / ${minT}°C\n"
+                "• Humidity: $hum% | Wind Speed: $wind km/h";
+
+            return {
+              'type': 'weather',
+              'context': cleanWeatherSummaryEn,
+            };
           }
         }
       } catch (_) {}
     }
 
-    // LAYER 2: DuckDuckGo Full Web Search HTML Scraper (Scrapes real internet search results & snippets!)
-    for (final searchQuery in {rawQuery, englishQuery}) {
-      if (searchQuery.trim().isEmpty) continue;
-      try {
-        final ddgHtmlUri = Uri.https('html.duckduckgo.com', '/html/', {'q': searchQuery});
-        final resp = await http.get(ddgHtmlUri, headers: {
-          'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Accept-Language': '$detectedLang,en-US;q=0.9,en;q=0.8',
-        }).timeout(const Duration(seconds: 4));
+    // GENERAL GOOGLE / DUCKDUCKGO / WIKI WEB SEARCH (Capped to top 3 concise results so AI never overflows!)
+    final List<String> conciseSnippets = [];
 
-        if (resp.statusCode == 200) {
-          final htmlBody = utf8.decode(resp.bodyBytes);
-          final RegExp snippetRegex = RegExp(
-            r'<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>',
-            caseSensitive: false,
-          );
-          final matches = snippetRegex.allMatches(htmlBody);
-          int count = 0;
-          for (final m in matches) {
-            if (count >= 4) break;
-            final String cleanSnippet = _decodeHtmlEntities(m.group(1) ?? "");
-            if (cleanSnippet.length > 25) {
-              collectedWebFacts.add("Web Search Result: $cleanSnippet");
-              count++;
-            }
-          }
-          if (count > 0) break;
-        }
-      } catch (_) {}
-    }
-
-    // LAYER 3: Google News & Live Web Index RSS Search (`news.google.com/rss/search`)
+    // 1. DuckDuckGo Web Search HTML Scraper (Top 2 results)
     try {
-      final String hl = (detectedLang.length == 2) ? detectedLang : 'en';
-      final Uri googleRssUri = Uri.https('news.google.com', '/rss/search', {
-        'q': rawQuery,
-        'hl': hl,
-      });
-      final resp = await http.get(googleRssUri, headers: {
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 14)',
+      final ddgHtmlUri = Uri.https('html.duckduckgo.com', '/html/', {'q': rawQuery});
+      final resp = await http.get(ddgHtmlUri, headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept-Language': '$detectedLang,en-US;q=0.9,en;q=0.8',
       }).timeout(const Duration(seconds: 4));
 
       if (resp.statusCode == 200) {
-        final xmlBody = utf8.decode(resp.bodyBytes);
-        final RegExp itemTitleRegex = RegExp(r'<item>[\s\S]*?<title>([\s\S]*?)<\/title>', caseSensitive: false);
-        final matches = itemTitleRegex.allMatches(xmlBody);
-        int count = 0;
+        final htmlBody = utf8.decode(resp.bodyBytes);
+        final RegExp snippetRegex = RegExp(r'<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>', caseSensitive: false);
+        final matches = snippetRegex.allMatches(htmlBody);
         for (final m in matches) {
-          if (count >= 3) break;
-          final String cleanTitle = _decodeHtmlEntities(m.group(1) ?? "");
-          if (cleanTitle.isNotEmpty) {
-            collectedWebFacts.add("Google Live Index: $cleanTitle");
-            count++;
+          if (conciseSnippets.length >= 2) break;
+          final String cleanSnippet = _decodeHtmlEntities(m.group(1) ?? "");
+          if (cleanSnippet.length > 25) {
+            conciseSnippets.add("• $cleanSnippet");
           }
         }
       }
     } catch (_) {}
 
-    // LAYER 4: DuckDuckGo Instant Answer JSON + Multilingual Wikipedia
-    try {
-      final ddgApiUri = Uri.https('api.duckduckgo.com', '/', {
-        'q': englishQuery,
-        'format': 'json',
-        'no_html': '1',
-        'skip_disambig': '1',
-      });
-      final resp = await http.get(ddgApiUri).timeout(const Duration(seconds: 3));
-      if (resp.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(resp.bodyBytes));
-        final String abstractText = (data['AbstractText'] ?? "").toString().trim();
-        final String answerText = (data['Answer'] ?? "").toString().trim();
-        if (answerText.isNotEmpty) collectedWebFacts.add("Direct Answer: $answerText");
-        if (abstractText.isNotEmpty) collectedWebFacts.add("Summary: $abstractText");
-      }
-    } catch (_) {}
-
-    final String wikiLang = (detectedLang.length == 2) ? detectedLang : 'en';
-    for (final langHost in {wikiLang, 'en'}) {
+    // 2. Google News / Web Index RSS (Top 2 results)
+    if (conciseSnippets.length < 3) {
       try {
-        final String qToUse = (langHost == 'en') ? englishQuery : rawQuery;
-        final uri = Uri.https('$langHost.wikipedia.org', '/w/api.php', {
+        final String hl = (detectedLang.length == 2) ? detectedLang : 'en';
+        final Uri googleRssUri = Uri.https('news.google.com', '/rss/search', {'q': rawQuery, 'hl': hl});
+        final resp = await http.get(googleRssUri, headers: {
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 14)',
+        }).timeout(const Duration(seconds: 3));
+
+        if (resp.statusCode == 200) {
+          final xmlBody = utf8.decode(resp.bodyBytes);
+          final RegExp itemTitleRegex = RegExp(r'<item>[\s\S]*?<title>([\s\S]*?)<\/title>', caseSensitive: false);
+          for (final m in itemTitleRegex.allMatches(xmlBody)) {
+            if (conciseSnippets.length >= 3) break;
+            final String cleanTitle = _decodeHtmlEntities(m.group(1) ?? "");
+            if (cleanTitle.isNotEmpty) conciseSnippets.add("• $cleanTitle");
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3. Wikipedia fallback if still under 3 snippets
+    if (conciseSnippets.length < 2) {
+      final String wikiLang = (detectedLang.length == 2) ? detectedLang : 'en';
+      try {
+        final uri = Uri.https('$wikiLang.wikipedia.org', '/w/api.php', {
           'action': 'query',
           'list': 'search',
-          'srsearch': qToUse,
+          'srsearch': rawQuery,
           'utf8': '1',
           'format': 'json',
         });
@@ -2275,63 +2319,62 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         if (resp.statusCode == 200) {
           final data = jsonDecode(utf8.decode(resp.bodyBytes));
           final List searchResults = data['query']?['search'] ?? [];
-          for (int i = 0; i < searchResults.length && i < 2; i++) {
+          for (int i = 0; i < searchResults.length && conciseSnippets.length < 3; i++) {
             final title = searchResults[i]['title'];
             final snippet = _decodeHtmlEntities(searchResults[i]['snippet'].toString());
-            collectedWebFacts.add("Encyclopedia ($title): $snippet");
+            conciseSnippets.add("• $title: $snippet");
           }
         }
       } catch (_) {}
     }
 
-    if (collectedWebFacts.isNotEmpty) {
-      return "[LIVE GOOGLE & WEB SEARCH RESULTS:\n${collectedWebFacts.join('\n')}]";
+    String joined = conciseSnippets.join('\n');
+    if (joined.length > 650) {
+      joined = joined.substring(0, 650);
     }
-    return "";
+
+    return {
+      'type': 'web',
+      'context': joined,
+    };
   }
 
-  // MULTI-ENDPOINT AI ENGINE WITH 'searchgpt' LIVE BROWSING WHEN TOGGLE IS ON:
   Future<String> _generateIntelligentAiResponse({
     required String userPrompt,
     required String englishTranslation,
     required String detectedLang,
+    required String contextType,
     required String webOrWeatherContext,
     required String visionInfo,
     required String ragTranscript,
   }) async {
     final String modelPersona = _activeAiModelTitle.toLowerCase().contains("deepseek") ? "DeepSeek-R1" : "Qwen-2.5";
 
+    // FAST PATH FOR WEATHER: If the user asked for weather and we have the exact live weather card, translate it cleanly into their exact language right away!
+    if (contextType == 'weather' && webOrWeatherContext.isNotEmpty) {
+      if (detectedLang != 'en' && detectedLang != 'same') {
+        final List<String> lines = webOrWeatherContext.split('\n');
+        final List<String> translatedLines = await _translateBatchLines(lines, detectedLang);
+        return translatedLines.join('\n');
+      }
+      return webOrWeatherContext;
+    }
+
     final List<Map<String, String>> chatHistory = [];
     final String systemInstruction =
-        "You are $modelPersona, an intelligent, natural, and helpful AI assistant running inside Pro Media Studio on $_hardwareTierBadge. "
-        "CRITICAL RULE 1: Always reply in the EXACT SAME LANGUAGE that the user used in their message (if Arabic, reply 100% in natural Arabic; if German, reply in German; if English, reply in English). "
-        "CRITICAL RULE 2: You have full live web search and live weather access when [LIVE GOOGLE & WEB SEARCH RESULTS] is provided below. Use those live results to answer the user's question directly, accurately, and naturally! Never claim you don't have internet or real-time access when live results are provided. "
-        "Do not use raw markdown double-asterisks (**)."
+        "You are $modelPersona running on $_hardwareTierBadge. "
+        "Reply in the EXACT SAME LANGUAGE as the user's message. "
+        "Answer directly, naturally, and concisely without raw markdown asterisks (**)."
         "${visionInfo.isNotEmpty ? '\n$visionInfo' : ''}"
         "${ragTranscript.isNotEmpty ? '\n$ragTranscript' : ''}"
-        "${webOrWeatherContext.isNotEmpty ? '\n$webOrWeatherContext' : ''}";
+        "${webOrWeatherContext.isNotEmpty ? '\nReference facts:\n$webOrWeatherContext' : ''}";
 
     chatHistory.add({'role': 'system', 'content': systemInstruction});
+    chatHistory.add({'role': 'user', 'content': userPrompt});
 
-    final int startIdx = (_messages.length > 5) ? _messages.length - 5 : 1;
-    for (int i = startIdx; i < _messages.length; i++) {
-      final m = _messages[i];
-      chatHistory.add({
-        'role': m.sender == 'user' ? 'user' : 'assistant',
-        'content': m.text,
-      });
-    }
-    chatHistory.add({
-      'role': 'user',
-      'content': webOrWeatherContext.isNotEmpty
-          ? "$userPrompt\n\n$webOrWeatherContext"
-          : userPrompt,
-    });
-
-    // When Web Search Toggle is ON, prioritize 'searchgpt' (native online web-searching model) first!
     final List<String> modelPriority = _webSearchEnabled
-        ? ['searchgpt', 'openai', 'mistral', 'llama']
-        : ['openai', 'mistral', 'llama'];
+        ? ['openai', 'searchgpt', 'mistral']
+        : ['openai', 'mistral'];
 
     for (final modelName in modelPriority) {
       try {
@@ -2346,7 +2389,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                 'temperature': 0.7,
               }),
             )
-            .timeout(const Duration(seconds: 14));
+            .timeout(const Duration(seconds: 12));
 
         if (response.statusCode == 200) {
           final decoded = jsonDecode(utf8.decode(response.bodyBytes));
@@ -2358,57 +2401,33 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       } catch (_) {}
     }
 
-    // Fallback 2: Root POST
+    // Fallback 2: Short GET request (kept under 400 chars so URL never fails!)
     try {
-      final uri = Uri.parse('https://text.pollinations.ai/');
-      final response = await http
-          .post(
-            uri,
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'messages': chatHistory,
-              'model': _webSearchEnabled ? 'searchgpt' : 'openai',
-            }),
-          )
-          .timeout(const Duration(seconds: 12));
-
-      if (response.statusCode == 200 && response.body.trim().isNotEmpty) {
-        return _cleanMarkdownFormatting(utf8.decode(response.bodyBytes));
-      }
-    } catch (_) {}
-
-    // Fallback 3: Direct GET stream with searchgpt/openai
-    try {
-      final String modelParam = _webSearchEnabled ? 'searchgpt' : 'openai';
+      final String shortContext = webOrWeatherContext.length > 220
+          ? webOrWeatherContext.substring(0, 220)
+          : webOrWeatherContext;
       final String combinedPrompt =
-          "Reply in the exact same language as the user. ${webOrWeatherContext.isNotEmpty ? '$webOrWeatherContext. ' : ''}Question: $userPrompt";
+          "Reply in the user's language ($detectedLang). ${shortContext.isNotEmpty ? 'Context: $shortContext. ' : ''}Question: $userPrompt";
       final uri = Uri.parse(
-        'https://text.pollinations.ai/${Uri.encodeComponent(combinedPrompt)}?model=$modelParam',
+        'https://text.pollinations.ai/${Uri.encodeComponent(combinedPrompt)}?model=openai',
       );
-      final response = await http.get(uri).timeout(const Duration(seconds: 12));
+      final response = await http.get(uri).timeout(const Duration(seconds: 10));
       if (response.statusCode == 200 && response.body.trim().isNotEmpty) {
         return _cleanMarkdownFormatting(utf8.decode(response.bodyBytes));
       }
     } catch (_) {}
 
-    // Offline / Airplane-Mode Multilingual Fallback
-    String baseAnswerEn = "";
+    // Clean Fallback if offline or server busy
     if (webOrWeatherContext.isNotEmpty) {
-      baseAnswerEn = webOrWeatherContext.replaceAll('[', '').replaceAll(']', '');
-    } else if (englishTranslation.toLowerCase().contains("code") ||
-        englishTranslation.toLowerCase().contains("flutter") ||
-        englishTranslation.toLowerCase().contains("ffmpeg")) {
-      return "💻 [$modelPersona • Offline Coding Mode]:\n\n```dart\nfinal session = await FFmpegKit.execute('-y -threads $_optimalThreads -i input.mp4 -c:v libx264 -preset $_optimalPreset output.mp4');\n```";
-    } else {
-      baseAnswerEn =
-          "You are currently in 100% Offline Mode (no internet connection detected). Connect to Wi-Fi or mobile data with the Web Search toggle ON to search live Google/Web results, or ask me about your local video transcripts and coding!";
+      return _cleanMarkdownFormatting(webOrWeatherContext);
     }
 
+    String baseAnswerEn =
+        "You are currently in Offline Mode. Connect to Wi-Fi or mobile data to search the web, or ask me about your video transcripts and coding!";
     if (detectedLang != 'en' && detectedLang != 'same') {
-      final translatedReply = await _translateSingleLineWithRetry(baseAnswerEn, detectedLang);
-      return _cleanMarkdownFormatting(translatedReply);
+      return await _translateSingleLineWithRetry(baseAnswerEn, detectedLang);
     }
-    return _cleanMarkdownFormatting(baseAnswerEn);
+    return baseAnswerEn;
   }
 
   Future<void> _sendChatMessage() async {
@@ -2433,10 +2452,12 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     final String englishQuery = langInfo['enText'] ?? text;
     final String detectedLang = langInfo['lang'] ?? 'en';
 
-    // When toggle is ON, run the full 4-Layer Google + DuckDuckGo + Weather + Wiki aggregator!
+    String contextType = "none";
     String webOrWeatherContext = "";
     if (_webSearchEnabled && text.isNotEmpty) {
-      webOrWeatherContext = await _fetchFullGoogleAndWebSearchContext(text, englishQuery, detectedLang);
+      final resMap = await _fetchSmartWebOrWeatherContext(text, englishQuery, detectedLang);
+      contextType = resMap['type'] ?? "none";
+      webOrWeatherContext = resMap['context'] ?? "";
     }
 
     String visionAnalysis = "";
@@ -2452,8 +2473,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
     String ragTranscriptContext = "";
     if (_lastGeneratedTranscript.isNotEmpty) {
-      final preview = _lastGeneratedTranscript.length > 600
-          ? "${_lastGeneratedTranscript.substring(0, 600)}..."
+      final preview = _lastGeneratedTranscript.length > 500
+          ? "${_lastGeneratedTranscript.substring(0, 500)}..."
           : _lastGeneratedTranscript;
       ragTranscriptContext = "[Current Video Subtitle Transcript: $preview]";
     }
@@ -2462,6 +2483,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       userPrompt: text.isEmpty ? "Analyze this attached media file." : text,
       englishTranslation: englishQuery,
       detectedLang: detectedLang,
+      contextType: contextType,
       webOrWeatherContext: webOrWeatherContext,
       visionInfo: visionAnalysis,
       ragTranscript: ragTranscriptContext,
@@ -2641,7 +2663,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               );
             }),
 
-            // Tab 6: FULL-SCREEN Multilingual AI Chat with Live Google & Web Search
+            // Tab 6: FULL-SCREEN Multilingual AI Chat
             Column(
               children: [
                 Container(

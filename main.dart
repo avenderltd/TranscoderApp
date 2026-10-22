@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:record/record.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 import 'package:lib_llama_cpp/lib_llama_cpp.dart';
@@ -132,6 +133,7 @@ class TranscoderScreen extends StatefulWidget {
 class _TranscoderScreenState extends State<TranscoderScreen> {
   late StreamSubscription _intentSub;
   final FlutterTts _flutterTts = FlutterTts();
+  final AudioRecorder _voiceRecorder = AudioRecorder();
   final ScrollController _chatScrollController = ScrollController();
 
   File? _inputFile;

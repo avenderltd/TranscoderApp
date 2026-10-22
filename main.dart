@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_tts/flutter_tts.dart';
-import 'package:record/record.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:google_mlkit_translation/google_mlkit_translation.dart';
 import 'package:lib_llama_cpp/lib_llama_cpp.dart';
@@ -93,7 +92,7 @@ class ChatMessage {
 
 class AiModelOption {
   final String id;
-  final String tierCategory; // "Mobile", "Laptop / Gaming PC", "Workstation", "Supercomputer ($500k+)"
+  final String tierCategory; // "Mobile", "Laptop / Gaming PC", "Workstation", "Supercomputer"
   final String friendlyName;
   final String technicalName;
   final String sizeLabel;
@@ -133,7 +132,6 @@ class TranscoderScreen extends StatefulWidget {
 class _TranscoderScreenState extends State<TranscoderScreen> {
   late StreamSubscription _intentSub;
   final FlutterTts _flutterTts = FlutterTts();
-  final AudioRecorder _voiceRecorder = AudioRecorder();
   final ScrollController _chatScrollController = ScrollController();
 
   File? _inputFile;
@@ -153,8 +151,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   // Local AI Chat, Permanent Memory & Voice Call State
   final TextEditingController _chatController = TextEditingController();
   bool _webSearchEnabled = true;
-  bool _autoVoiceReplyEnabled = true; // Speaks back like a real human!
-  String _aiVoiceGender = "female"; // "female" or "male"
+  bool _autoVoiceReplyEnabled = true;
+  String _aiVoiceGender = "female";
   bool _isRecordingVoice = false;
   bool _isSpeakingNow = false;
   bool _isAiGenerating = false;
@@ -166,17 +164,15 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   String _downloadingModelName = "";
   File? _attachedVisionFile;
 
-  // Permanent Infinite Memory Vault (Never forgets a single thing you ever told it!)
   List<String> _permanentMemoryFacts = [];
   List<ChatMessage> _messages = [
     ChatMessage(
       sender: "ai",
       text:
-          "Hello! مرحباً! Hallo! 👋\n\nI have **100% Permanent Memory** (I remember everything you ever tell me, even after you restart your phone) and **Live Human Voice Chat** (tap the 🎙️ Mic button to talk to me with your voice, and I will talk back to you!).\n\nTap **'All AI Brains'** above to browse all 12 AI models—from 0.5B phone models all the way up to 671B $500,000 Supercomputer models!",
+          "Hello! مرحباً! Hallo! 👋\n\nI have Permanent Memory and Live Human Voice Chat (tap the Mic button to talk with your voice, and I will talk back!).\n\nTap 'All 12 AI Brains' above to browse all models—from 0.5B phone models up to 671B Supercomputer models!",
     )
   ];
 
-  // FULL 12-TIER AI MODEL CATALOG (From Budget Phones up to $500,000 H100 Supercomputers!)
   final List<AiModelOption> _aiModelCatalog = [
     AiModelOption(
       id: "qwen_05b",
@@ -186,12 +182,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       sizeLabel: "398 MB",
       minValidBytes: 350 * 1024 * 1024,
       hardwareRequiredLabel: "✅ Runs on ANY Android Phone (2GB+ RAM)",
-      whatItDoes:
-          "An ultra-light AI brain that downloads in seconds, uses almost zero battery, and replies instantaneously offline.",
-      howItHelpsYou:
-          "Best for quick everyday questions, grammar fixes, translating short phrases, and summarizing video subtitles on any phone.",
-      downloadUrl:
-          "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+      whatItDoes: "An ultra-light AI brain that downloads in seconds and replies fast offline.",
+      howItHelpsYou: "Best for quick everyday questions, grammar fixes, and short summaries.",
+      downloadUrl: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
       fileName: "qwen2.5-0.5b-instruct-q4_k_m.gguf",
       minCoresRecommended: 2,
       minRamGBRecommended: 2,
@@ -204,12 +197,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       sizeLabel: "1.12 GB",
       minValidBytes: 950 * 1024 * 1024,
       hardwareRequiredLabel: "⭐ Best Match for Modern Phones (6GB+ RAM)",
-      whatItDoes:
-          "A chain-of-thought reasoning AI that thinks step-by-step before answering. Understands coding, math, and all languages.",
-      howItHelpsYou:
-          "Ideal for writing Flutter/Python/FFmpeg code, solving logic problems, and having smart conversations on your phone without lag.",
-      downloadUrl:
-          "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
+      whatItDoes: "A reasoning AI that thinks step-by-step. Understands coding, math, and all languages.",
+      howItHelpsYou: "Ideal for writing Flutter/Python/FFmpeg code and solving logic problems.",
+      downloadUrl: "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
       fileName: "DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
       minCoresRecommended: 6,
       minRamGBRecommended: 6,
@@ -221,13 +211,10 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       technicalName: "Qwen2.5-3B-Instruct (Q4_K_M GGUF)",
       sizeLabel: "1.93 GB",
       minValidBytes: 1700 * 1024 * 1024,
-      hardwareRequiredLabel: "⭐ Best for Flagship Phones (Pixel/Ultra 8GB+ RAM)",
-      whatItDoes:
-          "Doubles the neural parameters for fluent Arabic/German/English nuances, creative scriptwriting, and deep analysis.",
-      howItHelpsYou:
-          "Great for writing full YouTube scripts, business letters, accurate translations, and analyzing media transcripts.",
-      downloadUrl:
-          "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
+      hardwareRequiredLabel: "⭐ Best for Flagship Phones (8GB+ RAM)",
+      whatItDoes: "Enhanced parameters for multilingual translation and scriptwriting.",
+      howItHelpsYou: "Great for writing YouTube scripts and analyzing media transcripts.",
+      downloadUrl: "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
       fileName: "qwen2.5-3b-instruct-q4_k_m.gguf",
       minCoresRecommended: 7,
       minRamGBRecommended: 8,
@@ -239,13 +226,10 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       technicalName: "Llama-3.2-3B-Instruct (Q4_K_M GGUF)",
       sizeLabel: "2.02 GB",
       minValidBytes: 1800 * 1024 * 1024,
-      hardwareRequiredLabel: "⭐ Great for Flagship Phones (8GB+ RAM) & Laptops",
-      whatItDoes:
-          "Meta's flagship mobile model tuned for ultra-natural human dialogue, roleplay, and personal assistant tasks.",
-      howItHelpsYou:
-          "Feels like talking to a real person during voice chat, remembers personal details effortlessly, and summarizes long documents.",
-      downloadUrl:
-          "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+      hardwareRequiredLabel: "⭐ Great for Flagship Phones & Laptops",
+      whatItDoes: "Tuned for natural human dialogue and personal assistant tasks.",
+      howItHelpsYou: "Feels like talking to a real person during voice chat.",
+      downloadUrl: "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
       fileName: "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
       minCoresRecommended: 7,
       minRamGBRecommended: 8,
@@ -257,13 +241,10 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       technicalName: "DeepSeek-R1-Distill-Qwen-7B (Q4_K_M GGUF)",
       sizeLabel: "4.68 GB",
       minValidBytes: 4100 * 1024 * 1024,
-      hardwareRequiredLabel: "💻 For 12GB+ Phones or Gaming Laptops (ASUS TUF / RTX)",
-      whatItDoes:
-          "A full 7-billion parameter desktop-class reasoning brain that rivals paid cloud AI subscriptions.",
-      howItHelpsYou:
-          "Gives you serious software engineering, complex debugging, legal/company document drafting, and deep scientific reasoning.",
-      downloadUrl:
-          "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
+      hardwareRequiredLabel: "💻 For Gaming Laptops (ASUS TUF / RTX)",
+      whatItDoes: "A full 7B desktop-class reasoning brain.",
+      howItHelpsYou: "Gives you software engineering and scientific reasoning.",
+      downloadUrl: "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
       fileName: "DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
       minCoresRecommended: 8,
       minRamGBRecommended: 12,
@@ -275,13 +256,10 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       technicalName: "Qwen2.5-Coder-14B-Instruct (Q4_K_M GGUF)",
       sizeLabel: "8.99 GB",
       minValidBytes: 8000 * 1024 * 1024,
-      hardwareRequiredLabel: "💻 Requires Laptop / PC with 16GB+ RAM & GPU",
-      whatItDoes:
-          "One of the world's strongest open-weights coding models, trained on 5.5 trillion tokens of source code across 92 programming languages.",
-      howItHelpsYou:
-          "Can architect entire mobile apps, write C++/CUDA kernels, debug complex stack traces, and refactor full repositories offline.",
-      downloadUrl:
-          "https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct-GGUF/resolve/main/qwen2.5-coder-14b-instruct-q4_k_m.gguf",
+      hardwareRequiredLabel: "💻 Requires PC with 16GB+ RAM & GPU",
+      whatItDoes: "World-class open-weights coding model across 92 languages.",
+      howItHelpsYou: "Architects apps and debugs complex stack traces offline.",
+      downloadUrl: "https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct-GGUF/resolve/main/qwen2.5-coder-14b-instruct-q4_k_m.gguf",
       fileName: "qwen2.5-coder-14b-instruct-q4_k_m.gguf",
       minCoresRecommended: 10,
       minRamGBRecommended: 16,
@@ -289,17 +267,14 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     AiModelOption(
       id: "mistral_small_24b",
       tierCategory: "🖥️ Pro Workstation",
-      friendlyName: "7. Mistral Small 3 European Multilingual Pro (24B)",
+      friendlyName: "7. Mistral Small 3 European Multilingual (24B)",
       technicalName: "Mistral-Small-24B-Instruct-2501 (Q4_K_M GGUF)",
       sizeLabel: "14.3 GB",
       minValidBytes: 13000 * 1024 * 1024,
-      hardwareRequiredLabel: "🖥️ Requires High-End Laptop / PC (24GB+ RAM / RTX 3090/4090)",
-      whatItDoes:
-          "A 24-billion parameter European powerhouse with native mastery of German, French, English, Arabic, and low-latency reasoning.",
-      howItHelpsYou:
-          "Delivers near-GPT-4o quality translations, legal & financial analysis, and multi-agent tool use on high-end workstations.",
-      downloadUrl:
-          "https://huggingface.co/bartowski/Mistral-Small-24B-Instruct-2501-GGUF/resolve/main/Mistral-Small-24B-Instruct-2501-Q4_K_M.gguf",
+      hardwareRequiredLabel: "🖥️ Requires Workstation (24GB+ RAM / RTX 3090)",
+      whatItDoes: "European powerhouse with mastery of German, French, and English.",
+      howItHelpsYou: "Delivers GPT-4o quality translations and legal/financial analysis.",
+      downloadUrl: "https://huggingface.co/bartowski/Mistral-Small-24B-Instruct-2501-GGUF/resolve/main/Mistral-Small-24B-Instruct-2501-Q4_K_M.gguf",
       fileName: "Mistral-Small-24B-Instruct-2501-Q4_K_M.gguf",
       minCoresRecommended: 12,
       minRamGBRecommended: 24,
@@ -311,13 +286,10 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       technicalName: "DeepSeek-R1-Distill-Qwen-32B (Q4_K_M GGUF)",
       sizeLabel: "19.8 GB",
       minValidBytes: 18000 * 1024 * 1024,
-      hardwareRequiredLabel: "🖥️ Requires Workstation PC / Mac Studio (32GB+ RAM)",
-      whatItDoes:
-          "Outperforms OpenAI o1-mini on math, competitive programming, and PhD-level science benchmarks completely offline.",
-      howItHelpsYou:
-          "Built for deep-tech founders, researchers, and engineers solving quantum simulation, neuroscience, and AI architecture problems.",
-      downloadUrl:
-          "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-32B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-32B-Q4_K_M.gguf",
+      hardwareRequiredLabel: "🖥️ Requires Workstation PC (32GB+ RAM)",
+      whatItDoes: "Outperforms OpenAI o1-mini on math and advanced science.",
+      howItHelpsYou: "Built for deep-tech founders and researchers.",
+      downloadUrl: "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-32B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-32B-Q4_K_M.gguf",
       fileName: "DeepSeek-R1-Distill-Qwen-32B-Q4_K_M.gguf",
       minCoresRecommended: 14,
       minRamGBRecommended: 32,
@@ -329,13 +301,10 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       technicalName: "Llama-3.3-70B-Instruct (Q4_K_M GGUF)",
       sizeLabel: "42.5 GB",
       minValidBytes: 40000 * 1024 * 1024,
-      hardwareRequiredLabel: "🖥️ Requires Dual-GPU Workstation / 64GB+ Unified RAM",
-      whatItDoes:
-          "Meta's 70-billion parameter giant that matches 400B+ models in human evaluation, coding, and multilingual synthesis.",
-      howItHelpsYou:
-          "Turns a 64GB+ workstation into a private corporate AI server capable of handling enterprise R&D with zero cloud exposure.",
-      downloadUrl:
-          "https://huggingface.co/bartowski/Llama-3.3-70B-Instruct-GGUF/resolve/main/Llama-3.3-70B-Instruct-Q4_K_M.gguf",
+      hardwareRequiredLabel: "🖥️ Requires Dual-GPU Workstation / 64GB+ RAM",
+      whatItDoes: "Datacenter flagship matching 400B+ models in evaluation.",
+      howItHelpsYou: "Turns a 64GB+ workstation into a private corporate server.",
+      downloadUrl: "https://huggingface.co/bartowski/Llama-3.3-70B-Instruct-GGUF/resolve/main/Llama-3.3-70B-Instruct-Q4_K_M.gguf",
       fileName: "Llama-3.3-70B-Instruct-Q4_K_M.gguf",
       minCoresRecommended: 16,
       minRamGBRecommended: 64,
@@ -347,56 +316,46 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       technicalName: "Qwen2.5-72B-Instruct (Q4_K_M GGUF)",
       sizeLabel: "47.4 GB",
       minValidBytes: 44000 * 1024 * 1024,
-      hardwareRequiredLabel: "🖥️ Requires 64GB–128GB RAM Workstation / Server",
-      whatItDoes:
-          "72-billion parameters of encyclopedic world knowledge, 128K context window, and top-ranked multilingual & coding mastery.",
-      howItHelpsYou:
-          "Can read entire books or 5-hour movie transcripts in a single prompt and generate flawless executive deliverables.",
-      downloadUrl:
-          "https://huggingface.co/Qwen/Qwen2.5-72B-Instruct-GGUF/resolve/main/qwen2.5-72b-instruct-q4_k_m-00001-of-00012.gguf",
+      hardwareRequiredLabel: "🖥️ Requires 64GB–128GB RAM Server",
+      whatItDoes: "72B parameters of world knowledge with a 128K context window.",
+      howItHelpsYou: "Reads entire books or long movie transcripts in a single prompt.",
+      downloadUrl: "https://huggingface.co/Qwen/Qwen2.5-72B-Instruct-GGUF/resolve/main/qwen2.5-72b-instruct-q4_k_m-00001-of-00012.gguf",
       fileName: "qwen2.5-72b-instruct-q4_k_m.gguf",
       minCoresRecommended: 16,
       minRamGBRecommended: 64,
     ),
     AiModelOption(
       id: "llama_31_405b",
-      tierCategory: "🏢 Supercomputer ($100k–$500k)",
+      tierCategory: "🏢 Supercomputer (\$100k-\$500k)",
       friendlyName: "11. Meta Llama 3.1 Behemoth Supercomputer (405B)",
       technicalName: "Meta-Llama-3.1-405B-Instruct (Q4_K_M GGUF)",
       sizeLabel: "245 GB",
       minValidBytes: 230000 * 1024 * 1024,
-      hardwareRequiredLabel: "🏢 Requires $100k+ Multi-GPU Server (300GB+ VRAM / RAM)",
-      whatItDoes:
-          "The largest dense open-weights transformer ever trained (405 billion parameters). Frontier-level human intelligence.",
-      howItHelpsYou:
-          "Designed for sovereign government labs, defense contractors, and supercomputing clusters needing frontier AI air-gapped.",
-      downloadUrl:
-          "https://huggingface.co/bartowski/Meta-Llama-3.1-405B-Instruct-GGUF",
+      hardwareRequiredLabel: "🏢 Requires Multi-GPU Server (\$100k+ Rig)",
+      whatItDoes: "Largest dense open-weights transformer ever trained.",
+      howItHelpsYou: "Designed for government labs and research clusters.",
+      downloadUrl: "https://huggingface.co/bartowski/Meta-Llama-3.1-405B-Instruct-GGUF",
       fileName: "Meta-Llama-3.1-405B-Instruct-Q4_K_M.gguf",
       minCoresRecommended: 32,
       minRamGBRecommended: 256,
     ),
     AiModelOption(
       id: "deepseek_r1_671b",
-      tierCategory: "🏢 Supercomputer ($500k+ Cluster)",
+      tierCategory: "🏢 Supercomputer (\$500k+ Cluster)",
       friendlyName: "12. DeepSeek-R1 Full Uncensored Frontier MoE (671B)",
       technicalName: "DeepSeek-R1-671B-Full-MoE (Q4_K_M GGUF)",
       sizeLabel: "404 GB",
       minValidBytes: 380000 * 1024 * 1024,
-      hardwareRequiredLabel: "🏢 Requires $500,000+ NVIDIA H100/B200 Cluster (512GB+ VRAM)",
-      whatItDoes:
-          "The full, un-distilled 671-Billion parameter DeepSeek-R1 Mixture-of-Experts master brain used by top research labs worldwide.",
-      howItHelpsYou:
-          "Unlocks the absolute pinnacle of human-level scientific discovery, theorem proving, and autonomous software engineering on a supercomputer.",
-      downloadUrl:
-          "https://huggingface.co/unsloth/DeepSeek-R1-GGUF",
+      hardwareRequiredLabel: "🏢 Requires \$500,000+ NVIDIA H100 Cluster",
+      whatItDoes: "The full un-distilled 671B DeepSeek-R1 Mixture-of-Experts brain.",
+      howItHelpsYou: "Pinnacle of human-level scientific discovery and software engineering.",
+      downloadUrl: "https://huggingface.co/unsloth/DeepSeek-R1-GGUF",
       fileName: "DeepSeek-R1-671B-Q4_K_M.gguf",
       minCoresRecommended: 64,
       minRamGBRecommended: 512,
     ),
   ];
 
-  // All 99 Official Whisper AI Supported World Languages + Same-as-Audio option
   final Map<String, String> _worldLanguages = {
     "Same as Video Audio (No Translation)": "same",
     "English": "en",
@@ -737,9 +696,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     _setupShareIntent();
   }
 
-  // ============================================================================
-  // 100% PERMANENT INFINITE MEMORY ENGINE (Saves & Loads Every Conversation & Fact!)
-  // ============================================================================
   Future<File> _getMemoryFile() async {
     final dir = await getApplicationDocumentsDirectory();
     return File('${dir.path}/ai_permanent_memory_v1.json');
@@ -769,7 +725,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   Future<void> _savePermanentMemoryToDisk() async {
     try {
       final file = await _getMemoryFile();
-      // Keep up to 500 messages on disk + permanent extracted facts
       final msgsToSave = _messages.length > 500 ? _messages.sublist(_messages.length - 500) : _messages;
       final payload = jsonEncode({
         'facts': _permanentMemoryFacts,
@@ -779,7 +734,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     } catch (_) {}
   }
 
-  // Automatically extracts personal facts, preferences, names, or instructions from user messages to remember forever!
   void _extractAndStorePermanentFact(String userText) {
     final String clean = userText.trim();
     if (clean.length < 4) return;
@@ -817,9 +771,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     }
   }
 
-  // ============================================================================
-  // LIVE HUMAN VOICE CHAT ENGINE (Speak to AI -> AI Speaks Back Naturally!)
-  // ============================================================================
   Future<void> _speakAiResponseAloud(String text, String langCode) async {
     final String cleanSpeech = text
         .replaceAll(RegExp(r'```[\s\S]*?```'), 'Code block generated.')
@@ -833,7 +784,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       final String ttsLang = (langCode == 'same' || langCode.isEmpty) ? 'en' : langCode;
       await _flutterTts.stop();
       await _flutterTts.setLanguage(ttsLang);
-      // Warm, natural human cadence & formant pitch
       await _flutterTts.setPitch(_aiVoiceGender == "male" ? 0.85 : 1.03);
       await _flutterTts.setSpeechRate(0.51);
 
@@ -855,14 +805,12 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     if (mounted) setState(() => _isSpeakingNow = false);
   }
 
-  // Tap Mic to start speaking -> Tap again to transcribe via Offline Whisper C++ & send to AI!
   Future<void> _toggleLiveVoiceRecording() async {
     if (_isSpeakingNow) {
       await _stopSpeaking();
     }
 
     if (_isRecordingVoice) {
-      // Stop recording and process voice message!
       try {
         final String? recordedPath = await _voiceRecorder.stop();
         setState(() {
@@ -915,7 +863,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         });
       }
     } else {
-      // Start recording user's voice
       try {
         if (await _voiceRecorder.hasPermission()) {
           final tempDir = await getTemporaryDirectory();
@@ -1148,13 +1095,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     }
   }
 
-  // ============================================================================
-  // FULL 12-TIER AI MODEL EXPLORER + LIVE HUGGINGFACE GGUF SEARCH
-  // Shows Best for Device OR All Models (up to 671B $500k Supercomputer models!)
-  // ============================================================================
   Future<void> _showAiModelRecommendationDialog() async {
     String modelSearchQuery = "";
-    bool showAllIncludingSupercomputer = true; // Shows ALL 12 models by default so user sees everything!
+    bool showAllIncludingSupercomputer = true;
     List<Map<String, String>> liveHfResults = [];
     bool isSearchingHf = false;
 
@@ -1232,16 +1175,15 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                 height: 520,
                 child: Column(
                   children: [
-                    // Search bar for catalog + Live HuggingFace GGUF search
                     TextField(
                       style: const TextStyle(color: Colors.white, fontSize: 13),
                       decoration: InputDecoration(
-                        hintText: "Search models (e.g. 70B, DeepSeek, Qwen, Llama, Coder)...",
+                        hintText: "Search models (e.g. 70B, DeepSeek, Qwen, Llama)...",
                         hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
                         prefixIcon: const Icon(Icons.search, color: Colors.tealAccent, size: 18),
                         suffixIcon: IconButton(
-                          tooltip: "Search 100,000+ Live Models on HuggingFace",
-                          icon: const Icon(Icons.cloud_Queue, color: Colors.tealAccent, size: 18),
+                          tooltip: "Search HuggingFace Hub",
+                          icon: const Icon(Icons.cloud_queue, color: Colors.tealAccent, size: 18),
                           onPressed: () => searchHuggingFaceLive(modelSearchQuery, setModalState),
                         ),
                         filled: true,
@@ -1255,7 +1197,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                       onSubmitted: (val) => searchHuggingFaceLive(val, setModalState),
                     ),
                     const SizedBox(height: 8),
-                    // Filter Chips: Best for Device vs Show ALL (including $500k Supercomputer models)
                     Row(
                       children: [
                         Expanded(
@@ -1460,7 +1401,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                                           Navigator.pop(context);
                                         },
                                         child: const Text(
-                                          "Use Cloud/Profile",
+                                          "Use Profile",
                                           style: TextStyle(color: Colors.tealAccent, fontSize: 11.5),
                                         ),
                                       ),
@@ -2973,10 +2914,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     };
   }
 
-  // ============================================================================
-  // INFINITE MEMORY + CONVERSATIONAL AI ENGINE
-  // Injects all permanent facts + recent history + semantic search into every turn!
-  // ============================================================================
   Future<String> _generateIntelligentAiResponse({
     required String userPrompt,
     required String englishTranslation,
@@ -2988,7 +2925,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   }) async {
     final String modelPersona = _activeAiModelTitle;
 
-    // Build Permanent Memory Vault string from disk-stored facts + past relevant messages
     final StringBuffer memoryVaultBuffer = StringBuffer();
     if (_permanentMemoryFacts.isNotEmpty) {
       memoryVaultBuffer.writeln("PERMANENT MEMORY VAULT (Everything the user has ever told you across all sessions):");
@@ -3016,7 +2952,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
     chatHistory.add({'role': 'system', 'content': systemInstruction});
 
-    // Include up to the last 14 messages of conversation history so multi-turn memory is rock-solid
     final int historyCount = _messages.length;
     final int startIdx = (historyCount > 15) ? historyCount - 15 : 1;
     for (int i = startIdx; i < historyCount - 1; i++) {
@@ -3101,7 +3036,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     if (text.isEmpty && _attachedVisionFile == null) return;
     if (_isAiGenerating) return;
 
-    // Save important facts into the Permanent Memory Vault immediately!
     if (text.isNotEmpty) {
       _extractAndStorePermanentFact(text);
     }
@@ -3178,7 +3112,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     await _savePermanentMemoryToDisk();
     _scrollToBottom();
 
-    // If Voice Reply is enabled (or user spoke via Mic), speak the response aloud like a real human!
     if (_autoVoiceReplyEnabled || forceVoiceReply) {
       await _speakAiResponseAloud(aiReply, detectedLang);
     }
@@ -3317,7 +3250,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         ),
         body: TabBarView(
           children: [
-            // Tabs 1-5: Media Tool Tabs
             ..._categories.values.map((presets) {
               return Column(
                 children: [
@@ -3351,7 +3283,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               );
             }),
 
-            // Tab 6: FULL-SCREEN Conversational AI with Infinite Memory, 12-Tier Store & Live Voice Chat
             Column(
               children: [
                 Container(
@@ -3413,7 +3344,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          // Voice Gender Toggle (Female / Male) + Auto-Speak Toggle
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -3451,7 +3381,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                               ),
                             ],
                           ),
-                          // Web Search Toggle
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -3546,7 +3475,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                       children: [
                         const Row(
                           children: [
-                            Icon(Icons.Spatial_audio_off, color: Colors.tealAccent, size: 16),
+                            Icon(Icons.spatial_audio_off, color: Colors.tealAccent, size: 16),
                             SizedBox(width: 8),
                             Text(
                               "AI is speaking aloud...",
@@ -3613,7 +3542,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         ),
                         SizedBox(width: 8),
                         Text(
-                          "AI is thinking with Infinite Memory...",
+                          "AI is thinking with Permanent Memory...",
                           style: TextStyle(color: Colors.tealAccent, fontSize: 12),
                         ),
                       ],
@@ -3629,7 +3558,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         icon: const Icon(Icons.add_a_photo_outlined, color: Colors.tealAccent),
                         onPressed: _pickVisionAttachment,
                       ),
-                      // LIVE HUMAN VOICE CHAT MIC BUTTON
                       GestureDetector(
                         onTap: _toggleLiveVoiceRecording,
                         child: Container(
@@ -3683,4 +3611,3 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     );
   }
 }
-

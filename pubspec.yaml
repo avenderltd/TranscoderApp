@@ -21,5 +21,8 @@ dependencies:
   google_mlkit_translation: ^0.11.0
   lib_llama_cpp: ^0.1.0
 
+dependency_overrides:
+  record_platform_interface: ^1.2.0
+
 flutter:
   uses-material-design: true

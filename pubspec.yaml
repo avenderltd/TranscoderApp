@@ -1,3 +1,6 @@
+# ============================================================================
+# FILE: pubspec.yaml (Verified for Tri-Engine Voice Cloning + Live Call)
+# ============================================================================
 name: transcoder_app
 description: A frictionless offline AI media studio and local LLM assistant.
 publish_to: 'none'

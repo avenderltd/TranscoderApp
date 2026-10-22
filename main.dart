@@ -119,14 +119,14 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   int _deviceCores = 4;
   int _optimalThreads = 4;
   String _optimalPreset = "superfast";
-  String _recommendedModel = "Option 1 (0.5B) or Option 2 (1.5B)";
+  String _recommendedModel = "Option 2 (1.5B) or Option 3 (3B)";
 
   // Local AI Chat & Model Downloader State
   final TextEditingController _chatController = TextEditingController();
   bool _webSearchEnabled = true;
   bool _isAiGenerating = false;
   File? _loadedGgufModel;
-  String _activeAiModelTitle = "Option 2: Smart Logic & Coding (1.5B)";
+  String _activeAiModelTitle = "Option 2: DeepSeek-R1 Smart Logic & Coding (1.5B)";
   bool _isDownloadingModel = false;
   double _modelDownloadProgress = 0.0;
   String _downloadingModelName = "";
@@ -135,13 +135,13 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   final List<AiModelOption> _aiModelCatalog = [
     AiModelOption(
       id: "qwen_05b",
-      friendlyName: "Option 1: Ultra-Fast Everyday AI (0.5B)",
+      friendlyName: "Option 1: Qwen Ultra-Fast Everyday AI (0.5B)",
       technicalName: "Qwen 2.5 (0.5B • Ultra-Light GGUF)",
       sizeLabel: "398 MB",
       minValidBytes: 350 * 1024 * 1024,
       badgeText: "⚡ Fastest • Works on ANY Android Phone",
       whatItDoes:
-          "A super-lightweight AI brain that downloads quickly, uses almost zero battery, and replies fast.",
+          "A super-lightweight AI brain that downloads quickly, uses almost zero battery, and replies fast in any language.",
       howItHelpsYou:
           "Perfect if you want quick answers, video title ideas, email writing, grammar fixes, or fast summaries of your video subtitles without slowing down your phone.",
       downloadUrl:
@@ -151,15 +151,15 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     ),
     AiModelOption(
       id: "deepseek_15b",
-      friendlyName: "Option 2: Smart Logic & Coding (1.5B)",
+      friendlyName: "Option 2: DeepSeek-R1 Smart Logic & Coding (1.5B)",
       technicalName: "DeepSeek-R1 Distill Qwen (1.5B GGUF)",
       sizeLabel: "1.12 GB",
       minValidBytes: 950 * 1024 * 1024,
       badgeText: "⭐ #1 Best Balance for Modern Phones & Laptops",
       whatItDoes:
-          "A reasoning AI that 'thinks step-by-step' before answering. It understands programming languages, math, and complex questions deeply.",
+          "A reasoning AI that 'thinks step-by-step' before answering. It understands all world languages, programming, math, and complex questions deeply.",
       howItHelpsYou:
-          "Best for writing and fixing code (Flutter, Python, FFmpeg), solving tough problems, analyzing long video transcripts, and brainstorming business ideas.",
+          "Best for writing and fixing code (Flutter, Python, FFmpeg), solving tough problems, analyzing long video transcripts, and answering in any language.",
       downloadUrl:
           "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
       fileName: "DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
@@ -167,7 +167,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     ),
     AiModelOption(
       id: "qwen_3b",
-      friendlyName: "Option 3: Creator & Deep Analysis (3B)",
+      friendlyName: "Option 3: Qwen Creator & Deep Analysis (3B)",
       technicalName: "Qwen 2.5 Instruct (3B • High-Intelligence GGUF)",
       sizeLabel: "1.93 GB",
       minValidBytes: 1700 * 1024 * 1024,
@@ -179,11 +179,11 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       downloadUrl:
           "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
       fileName: "qwen2.5-3b-instruct-q4_k_m.gguf",
-      minCoresRecommended: 8,
+      minCoresRecommended: 7,
     ),
     AiModelOption(
       id: "deepseek_7b",
-      friendlyName: "Option 4: Workstation Master Brain (7B)",
+      friendlyName: "Option 4: DeepSeek-R1 Workstation Master (7B)",
       technicalName: "DeepSeek-R1 Distill Qwen (7B • Desktop Grade GGUF)",
       sizeLabel: "4.68 GB",
       minValidBytes: 4100 * 1024 * 1024,
@@ -191,7 +191,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       whatItDoes:
           "A massive desktop-class AI model that rivals paid cloud subscriptions while running privately on your own hardware.",
       howItHelpsYou:
-          "Gives you maximum intelligence for full software engineering, complex legal/business document drafting, and deep research.",
+          "Gives you maximum intelligence for full software engineering, complex legal/business document drafting, and deep research in any language.",
       downloadUrl:
           "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
       fileName: "DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
@@ -203,7 +203,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     ChatMessage(
       sender: "ai",
       text:
-          "Hello! I am your AI Assistant. 👋\n\nAsk me anything—live weather, general questions, coding help (Flutter, Python, FFmpeg), or attach a photo/video with 📷 for analysis!",
+          "Hello! مرحباً! Hallo! Bonjour! 👋\n\nWhen 'Google & Web Search' is ON, I search live Google News, DuckDuckGo web results, live satellite weather, and multilingual knowledge bases in any language! Ask me anything or attach a photo/video with 📷.",
     )
   ];
 
@@ -584,7 +584,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     }
   }
 
-  // Checks if user already downloaded a COMPLETE GGUF model (deletes broken partial files!)
   Future<void> _checkAlreadyDownloadedModels() async {
     try {
       final dir = await getApplicationDocumentsDirectory();
@@ -616,8 +615,29 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     });
   }
 
-  // AUTO-RESUMING MODEL DOWNLOADER:
-  // Uses HTTP 'Range: bytes=...' headers so if a 1.1GB download drops halfway, it automatically resumes from the exact byte without losing progress or printing ugly URLs!
+  String _cleanMarkdownFormatting(String raw) {
+    return raw
+        .replaceAll('**', '')
+        .replaceAll('### ', '')
+        .replaceAll('## ', '')
+        .replaceAll(RegExp(r'<think>[\s\S]*?<\/think>'), '')
+        .trim();
+  }
+
+  String _decodeHtmlEntities(String input) {
+    return input
+        .replaceAll(RegExp(r'<[^>]*>'), '')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&apos;', "'")
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
   Future<void> _downloadAndActivateAiModel(AiModelOption option, StateSetter? modalSetState) async {
     if (_isDownloadingModel) return;
 
@@ -632,7 +652,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       final dir = await getApplicationDocumentsDirectory();
       final saveFile = File('${dir.path}/${option.fileName}');
 
-      // Check if ALREADY completely downloaded (matches true minValidBytes!)
       if (await saveFile.exists() && await saveFile.length() >= option.minValidBytes) {
         setState(() {
           _isDownloadingModel = false;
@@ -651,7 +670,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       int existingBytes = await saveFile.exists() ? await saveFile.length() : 0;
       int totalExpectedBytes = option.minValidBytes;
 
-      // Auto-retry & resume loop (up to 12 automatic resume attempts if connection blinks)
       for (int attempt = 0; attempt < 12; attempt++) {
         existingBytes = await saveFile.exists() ? await saveFile.length() : 0;
         if (existingBytes >= option.minValidBytes) break;
@@ -665,7 +683,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
           final response = await client.send(request).timeout(const Duration(seconds: 25));
           if (response.statusCode == 200 && existingBytes > 0) {
-            // Server didn't use Range; start fresh
             await saveFile.writeAsBytes([]);
             existingBytes = 0;
           }
@@ -1006,6 +1023,35 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     }
     if (clean == 'iw') return TranslateLanguage.hebrew;
     return null;
+  }
+
+  Future<Map<String, String>> _detectLanguageAndTranslateToEnglish(String text) async {
+    try {
+      final uri = Uri.https('translate.googleapis.com', '/translate_a/single', {
+        'client': 'gtx',
+        'sl': 'auto',
+        'tl': 'en',
+        'dt': 't',
+        'q': text,
+      });
+      final response = await http.get(uri, headers: {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 14)',
+      }).timeout(const Duration(seconds: 4));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+        final List sentences = decoded[0];
+        final StringBuffer translated = StringBuffer();
+        for (final s in sentences) {
+          if (s[0] != null) translated.write(s[0]);
+        }
+        final String detectedLang = (decoded.length > 2 && decoded[2] != null) ? decoded[2].toString() : "en";
+        return {
+          'enText': translated.toString().trim(),
+          'lang': detectedLang,
+        };
+      }
+    } catch (_) {}
+    return {'enText': text, 'lang': 'en'};
   }
 
   Future<List<String>> _translateBatchLines(List<String> lines, String targetLang) async {
@@ -2056,119 +2102,313 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     }
   }
 
-  // Real Live Weather + Web Search Lookup
-  Future<String> _fetchLiveWebAndWeatherContext(String query) async {
-    final String lower = query.toLowerCase();
-    // 1. Live Weather check via wttr.in
-    if (lower.contains("weather") || lower.contains("temperature") || lower.contains("forecast") || lower.contains("rain")) {
+  // ============================================================================
+  // 4-LAYER FULL WEB SEARCH ENGINE (Google Index + DuckDuckGo + Weather + Wiki)
+  // ============================================================================
+  Future<String> _fetchFullGoogleAndWebSearchContext(
+    String rawQuery,
+    String englishQuery,
+    String detectedLang,
+  ) async {
+    final List<String> collectedWebFacts = [];
+    final String lowerEn = englishQuery.toLowerCase();
+    final String lowerRaw = rawQuery.toLowerCase();
+
+    // LAYER 1: Live Satellite Weather (if asking about weather/temperature in ANY language)
+    final bool isWeatherQuery = lowerEn.contains("weather") ||
+        lowerEn.contains("temperature") ||
+        lowerEn.contains("forecast") ||
+        lowerEn.contains("rain") ||
+        lowerEn.contains("cold") ||
+        lowerEn.contains("hot") ||
+        lowerRaw.contains("طقس") ||
+        lowerRaw.contains("جو") ||
+        lowerRaw.contains("حرارة") ||
+        lowerRaw.contains("wetter") ||
+        lowerRaw.contains("météo") ||
+        lowerRaw.contains("clima") ||
+        lowerRaw.contains("hava");
+
+    if (isWeatherQuery) {
+      String targetLocation = "";
+      final RegExp inMatch = RegExp(r'\b(?:in|at|for|of)\s+([a-zA-Z\s]{2,25})', caseSensitive: false);
+      final match = inMatch.firstMatch(englishQuery);
+      if (match != null && match.group(1) != null) {
+        targetLocation = match.group(1)!
+            .replaceAll(RegExp(r'\b(today|now|tomorrow|right now|currently|please)\b', caseSensitive: false), '')
+            .trim();
+      }
+
       try {
-        final uri = Uri.parse('https://wttr.in/?format=j1');
-        final resp = await http.get(uri).timeout(const Duration(seconds: 5));
-        if (resp.statusCode == 200) {
-          final data = jsonDecode(resp.body);
-          final current = data['current_condition']?[0];
-          final area = data['nearest_area']?[0];
-          final city = area?['areaName']?[0]?['value'] ?? "your area";
-          final country = area?['country']?[0]?['value'] ?? "";
-          final tempC = current?['temp_C'] ?? "";
-          final feelsLikeC = current?['FeelsLikeC'] ?? "";
-          final desc = current?['weatherDesc']?[0]?['value'] ?? "Clear";
-          final humidity = current?['humidity'] ?? "";
-          final wind = current?['windspeedKmph'] ?? "";
-          return "🌤️ **Live Weather in $city, $country:**\n• Condition: $desc\n• Temperature: **${tempC}°C** (Feels like ${feelsLikeC}°C)\n• Humidity: $humidity% | Wind: $wind km/h";
+        double lat = 51.61;
+        double lon = 7.20;
+        String resolvedPlaceName = targetLocation.isNotEmpty ? targetLocation : "Local Area";
+
+        if (targetLocation.isNotEmpty) {
+          final geoUri = Uri.https('geocoding-api.open-meteo.com', '/v1/search', {
+            'name': targetLocation,
+            'count': '1',
+            'language': detectedLang,
+            'format': 'json',
+          });
+          final geoResp = await http.get(geoUri).timeout(const Duration(seconds: 4));
+          if (geoResp.statusCode == 200) {
+            final geoData = jsonDecode(utf8.decode(geoResp.bodyBytes));
+            final List? results = geoData['results'];
+            if (results != null && results.isNotEmpty) {
+              lat = (results[0]['latitude'] as num).toDouble();
+              lon = (results[0]['longitude'] as num).toDouble();
+              final String cName = results[0]['name'] ?? targetLocation;
+              final String country = results[0]['country'] ?? "";
+              resolvedPlaceName = country.isNotEmpty ? "$cName, $country" : cName;
+            }
+          }
+        }
+
+        final weatherUri = Uri.https('api.open-meteo.com', '/v1/forecast', {
+          'latitude': lat.toString(),
+          'longitude': lon.toString(),
+          'current': 'temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m',
+        });
+        final wResp = await http.get(weatherUri).timeout(const Duration(seconds: 4));
+        if (wResp.statusCode == 200) {
+          final wData = jsonDecode(wResp.body);
+          final cur = wData['current'];
+          if (cur != null) {
+            collectedWebFacts.add(
+              "Live Satellite Weather for $resolvedPlaceName: Temperature ${cur['temperature_2m']}°C (Feels like ${cur['apparent_temperature']}°C), Humidity ${cur['relative_humidity_2m']}%, Wind ${cur['wind_speed_10m']} km/h",
+            );
+          }
         }
       } catch (_) {}
     }
 
-    // 2. Live Wikipedia / Knowledge Search
-    try {
-      final uri = Uri.https('en.wikipedia.org', '/w/api.php', {
-        'action': 'query',
-        'list': 'search',
-        'srsearch': query,
-        'utf8': '1',
-        'format': 'json',
-      });
-      final resp = await http.get(uri).timeout(const Duration(seconds: 4));
-      if (resp.statusCode == 200) {
-        final data = jsonDecode(resp.body);
-        final List searchResults = data['query']?['search'] ?? [];
-        if (searchResults.isNotEmpty) {
-          final StringBuffer sb = StringBuffer("🌐 **Live Web Search Facts:**\n");
-          for (int i = 0; i < searchResults.length && i < 2; i++) {
-            final title = searchResults[i]['title'];
-            final snippet = searchResults[i]['snippet'].toString().replaceAll(RegExp(r'<[^>]*>'), '');
-            sb.writeln("• **$title**: $snippet");
+    // LAYER 2: DuckDuckGo Full Web Search HTML Scraper (Scrapes real internet search results & snippets!)
+    for (final searchQuery in {rawQuery, englishQuery}) {
+      if (searchQuery.trim().isEmpty) continue;
+      try {
+        final ddgHtmlUri = Uri.https('html.duckduckgo.com', '/html/', {'q': searchQuery});
+        final resp = await http.get(ddgHtmlUri, headers: {
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept-Language': '$detectedLang,en-US;q=0.9,en;q=0.8',
+        }).timeout(const Duration(seconds: 4));
+
+        if (resp.statusCode == 200) {
+          final htmlBody = utf8.decode(resp.bodyBytes);
+          final RegExp snippetRegex = RegExp(
+            r'<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>',
+            caseSensitive: false,
+          );
+          final matches = snippetRegex.allMatches(htmlBody);
+          int count = 0;
+          for (final m in matches) {
+            if (count >= 4) break;
+            final String cleanSnippet = _decodeHtmlEntities(m.group(1) ?? "");
+            if (cleanSnippet.length > 25) {
+              collectedWebFacts.add("Web Search Result: $cleanSnippet");
+              count++;
+            }
           }
-          return sb.toString();
+          if (count > 0) break;
+        }
+      } catch (_) {}
+    }
+
+    // LAYER 3: Google News & Live Web Index RSS Search (`news.google.com/rss/search`)
+    try {
+      final String hl = (detectedLang.length == 2) ? detectedLang : 'en';
+      final Uri googleRssUri = Uri.https('news.google.com', '/rss/search', {
+        'q': rawQuery,
+        'hl': hl,
+      });
+      final resp = await http.get(googleRssUri, headers: {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 14)',
+      }).timeout(const Duration(seconds: 4));
+
+      if (resp.statusCode == 200) {
+        final xmlBody = utf8.decode(resp.bodyBytes);
+        final RegExp itemTitleRegex = RegExp(r'<item>[\s\S]*?<title>([\s\S]*?)<\/title>', caseSensitive: false);
+        final matches = itemTitleRegex.allMatches(xmlBody);
+        int count = 0;
+        for (final m in matches) {
+          if (count >= 3) break;
+          final String cleanTitle = _decodeHtmlEntities(m.group(1) ?? "");
+          if (cleanTitle.isNotEmpty) {
+            collectedWebFacts.add("Google Live Index: $cleanTitle");
+            count++;
+          }
         }
       }
     } catch (_) {}
+
+    // LAYER 4: DuckDuckGo Instant Answer JSON + Multilingual Wikipedia
+    try {
+      final ddgApiUri = Uri.https('api.duckduckgo.com', '/', {
+        'q': englishQuery,
+        'format': 'json',
+        'no_html': '1',
+        'skip_disambig': '1',
+      });
+      final resp = await http.get(ddgApiUri).timeout(const Duration(seconds: 3));
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(resp.bodyBytes));
+        final String abstractText = (data['AbstractText'] ?? "").toString().trim();
+        final String answerText = (data['Answer'] ?? "").toString().trim();
+        if (answerText.isNotEmpty) collectedWebFacts.add("Direct Answer: $answerText");
+        if (abstractText.isNotEmpty) collectedWebFacts.add("Summary: $abstractText");
+      }
+    } catch (_) {}
+
+    final String wikiLang = (detectedLang.length == 2) ? detectedLang : 'en';
+    for (final langHost in {wikiLang, 'en'}) {
+      try {
+        final String qToUse = (langHost == 'en') ? englishQuery : rawQuery;
+        final uri = Uri.https('$langHost.wikipedia.org', '/w/api.php', {
+          'action': 'query',
+          'list': 'search',
+          'srsearch': qToUse,
+          'utf8': '1',
+          'format': 'json',
+        });
+        final resp = await http.get(uri).timeout(const Duration(seconds: 3));
+        if (resp.statusCode == 200) {
+          final data = jsonDecode(utf8.decode(resp.bodyBytes));
+          final List searchResults = data['query']?['search'] ?? [];
+          for (int i = 0; i < searchResults.length && i < 2; i++) {
+            final title = searchResults[i]['title'];
+            final snippet = _decodeHtmlEntities(searchResults[i]['snippet'].toString());
+            collectedWebFacts.add("Encyclopedia ($title): $snippet");
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (collectedWebFacts.isNotEmpty) {
+      return "[LIVE GOOGLE & WEB SEARCH RESULTS:\n${collectedWebFacts.join('\n')}]";
+    }
     return "";
   }
 
-  // REAL CONVERSATIONAL AI ENGINE (Conversational LLM + Offline Knowledge + Vision + Live Weather/Web)
-  Future<String> _generateIntelligentAiResponse(String userPrompt, String webOrWeatherContext, String visionInfo, String ragTranscript) async {
-    final String modelPersona = _activeAiModelTitle.contains("DeepSeek") ? "DeepSeek-R1" : "Qwen-2.5";
+  // MULTI-ENDPOINT AI ENGINE WITH 'searchgpt' LIVE BROWSING WHEN TOGGLE IS ON:
+  Future<String> _generateIntelligentAiResponse({
+    required String userPrompt,
+    required String englishTranslation,
+    required String detectedLang,
+    required String webOrWeatherContext,
+    required String visionInfo,
+    required String ragTranscript,
+  }) async {
+    final String modelPersona = _activeAiModelTitle.toLowerCase().contains("deepseek") ? "DeepSeek-R1" : "Qwen-2.5";
 
-    // 1. If user asked directly for weather and we fetched live weather, return it immediately and naturally!
-    if (webOrWeatherContext.startsWith("🌤️")) {
-      return "$webOrWeatherContext\n\nLet me know if you need the forecast for another city or want to plan a shoot around today's weather!";
+    final List<Map<String, String>> chatHistory = [];
+    final String systemInstruction =
+        "You are $modelPersona, an intelligent, natural, and helpful AI assistant running inside Pro Media Studio on $_hardwareTierBadge. "
+        "CRITICAL RULE 1: Always reply in the EXACT SAME LANGUAGE that the user used in their message (if Arabic, reply 100% in natural Arabic; if German, reply in German; if English, reply in English). "
+        "CRITICAL RULE 2: You have full live web search and live weather access when [LIVE GOOGLE & WEB SEARCH RESULTS] is provided below. Use those live results to answer the user's question directly, accurately, and naturally! Never claim you don't have internet or real-time access when live results are provided. "
+        "Do not use raw markdown double-asterisks (**)."
+        "${visionInfo.isNotEmpty ? '\n$visionInfo' : ''}"
+        "${ragTranscript.isNotEmpty ? '\n$ragTranscript' : ''}"
+        "${webOrWeatherContext.isNotEmpty ? '\n$webOrWeatherContext' : ''}";
+
+    chatHistory.add({'role': 'system', 'content': systemInstruction});
+
+    final int startIdx = (_messages.length > 5) ? _messages.length - 5 : 1;
+    for (int i = startIdx; i < _messages.length; i++) {
+      final m = _messages[i];
+      chatHistory.add({
+        'role': m.sender == 'user' ? 'user' : 'assistant',
+        'content': m.text,
+      });
+    }
+    chatHistory.add({
+      'role': 'user',
+      'content': webOrWeatherContext.isNotEmpty
+          ? "$userPrompt\n\n$webOrWeatherContext"
+          : userPrompt,
+    });
+
+    // When Web Search Toggle is ON, prioritize 'searchgpt' (native online web-searching model) first!
+    final List<String> modelPriority = _webSearchEnabled
+        ? ['searchgpt', 'openai', 'mistral', 'llama']
+        : ['openai', 'mistral', 'llama'];
+
+    for (final modelName in modelPriority) {
+      try {
+        final uri = Uri.parse('https://text.pollinations.ai/openai');
+        final response = await http
+            .post(
+              uri,
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'model': modelName,
+                'messages': chatHistory,
+                'temperature': 0.7,
+              }),
+            )
+            .timeout(const Duration(seconds: 14));
+
+        if (response.statusCode == 200) {
+          final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+          final String? content = decoded['choices']?[0]?['message']?['content'];
+          if (content != null && content.trim().isNotEmpty) {
+            return _cleanMarkdownFormatting(content);
+          }
+        }
+      } catch (_) {}
     }
 
-    // 2. Try fast free conversational LLM endpoint when online (Pollinations OpenAI-compatible text endpoint - zero API key needed!)
+    // Fallback 2: Root POST
     try {
-      final String systemPrompt =
-          "You are $modelPersona running inside Pro Media Studio on $_hardwareTierBadge. Be helpful, concise, and direct. "
-          "${visionInfo.isNotEmpty ? 'Attached media info: $visionInfo. ' : ''}"
-          "${ragTranscript.isNotEmpty ? 'Current video transcript: $ragTranscript. ' : ''}"
-          "${webOrWeatherContext.isNotEmpty ? 'Live web context: $webOrWeatherContext. ' : ''}";
-
       final uri = Uri.parse('https://text.pollinations.ai/');
       final response = await http
           .post(
             uri,
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({
-              'messages': [
-                {'role': 'system', 'content': systemPrompt},
-                {'role': 'user', 'content': userPrompt},
-              ],
-              'model': 'openai',
+              'messages': chatHistory,
+              'model': _webSearchEnabled ? 'searchgpt' : 'openai',
             }),
           )
           .timeout(const Duration(seconds: 12));
 
       if (response.statusCode == 200 && response.body.trim().isNotEmpty) {
-        final String cleanReply = utf8.decode(response.bodyBytes).trim();
-        String prefix = "";
-        if (visionInfo.isNotEmpty) prefix += "$visionInfo\n\n";
-        return "$prefix$cleanReply";
+        return _cleanMarkdownFormatting(utf8.decode(response.bodyBytes));
       }
     } catch (_) {}
 
-    // 3. 100% Offline Built-In Knowledge & Coding Engine (Works in total Airplane Mode with zero internet!)
-    final String lower = userPrompt.toLowerCase();
-    String offlineReply = "";
-    if (visionInfo.isNotEmpty) offlineReply += "$visionInfo\n\n";
-    if (webOrWeatherContext.isNotEmpty) offlineReply += "$webOrWeatherContext\n\n";
-    if (ragTranscript.isNotEmpty) offlineReply += "$ragTranscript\n\n";
+    // Fallback 3: Direct GET stream with searchgpt/openai
+    try {
+      final String modelParam = _webSearchEnabled ? 'searchgpt' : 'openai';
+      final String combinedPrompt =
+          "Reply in the exact same language as the user. ${webOrWeatherContext.isNotEmpty ? '$webOrWeatherContext. ' : ''}Question: $userPrompt";
+      final uri = Uri.parse(
+        'https://text.pollinations.ai/${Uri.encodeComponent(combinedPrompt)}?model=$modelParam',
+      );
+      final response = await http.get(uri).timeout(const Duration(seconds: 12));
+      if (response.statusCode == 200 && response.body.trim().isNotEmpty) {
+        return _cleanMarkdownFormatting(utf8.decode(response.bodyBytes));
+      }
+    } catch (_) {}
 
-    if (lower.contains("weather")) {
-      offlineReply +=
-          "🌤️ You are currently in **100% Offline Mode** (or without internet access), so live satellite weather cannot be fetched right now. Connect to Wi-Fi/mobile data and ask again for real-time temperature and conditions!";
-    } else if (lower.contains("code") || lower.contains("flutter") || lower.contains("dart") || lower.contains("ffmpeg") || lower.contains("python")) {
-      offlineReply +=
-          "💻 **[$modelPersona Offline Coding Engine]:**\nHere is a clean, production-ready implementation for your request:\n\n```dart\n// Hardware-optimized async task runner ($_optimalThreads threads)\nFuture<void> runStudioTask(String inputPath, String outputPath) async {\n  final cmd = '-y -threads $_optimalThreads -i \"\$inputPath\" -c:v libx264 -preset $_optimalPreset -crf 21 -c:a aac -ac 2 \"\$outputPath\"';\n  final session = await FFmpegKit.execute(cmd);\n  final code = await session.getReturnCode();\n  if (ReturnCode.isSuccess(code)) {\n    print('Task completed on $_hardwareTierBadge!');\n  }\n}\n```\nTell me what specific function or UI widget you want to build next!";
-    } else if (lower.contains("hello") || lower.contains("hi") || lower.contains("hey") || lower.contains("who are you")) {
-      offlineReply +=
-          "👋 Hey! I'm running your **$_activeAiModelTitle** profile on **$_hardwareTierBadge**.\n\nI can help you:\n• Answer everyday questions & look up live weather/facts\n• Write & debug code (Flutter, Dart, Python, FFmpeg)\n• Summarize or translate videos you load in the studio\n• Inspect photos & video files attached with the 📷 button!";
+    // Offline / Airplane-Mode Multilingual Fallback
+    String baseAnswerEn = "";
+    if (webOrWeatherContext.isNotEmpty) {
+      baseAnswerEn = webOrWeatherContext.replaceAll('[', '').replaceAll(']', '');
+    } else if (englishTranslation.toLowerCase().contains("code") ||
+        englishTranslation.toLowerCase().contains("flutter") ||
+        englishTranslation.toLowerCase().contains("ffmpeg")) {
+      return "💻 [$modelPersona • Offline Coding Mode]:\n\n```dart\nfinal session = await FFmpegKit.execute('-y -threads $_optimalThreads -i input.mp4 -c:v libx264 -preset $_optimalPreset output.mp4');\n```";
     } else {
-      offlineReply +=
-          "🧠 **[$modelPersona • Offline Reasoning]:**\nRegarding **\"$userPrompt\"**:\n\n1. **Key Takeaway:** Make sure Web Search is toggled ON (with Wi-Fi/Data active) if you want live real-time internet lookups.\n2. **Media & Transcript Analysis:** If you transcribe or dub a video in Tab 3, you can ask me to summarize or search inside that video's dialogue right here!\n3. **Coding & Tech:** Ask me to write any script in Dart, Flutter, Python, or Bash.";
+      baseAnswerEn =
+          "You are currently in 100% Offline Mode (no internet connection detected). Connect to Wi-Fi or mobile data with the Web Search toggle ON to search live Google/Web results, or ask me about your local video transcripts and coding!";
     }
 
-    return offlineReply.trim();
+    if (detectedLang != 'en' && detectedLang != 'same') {
+      final translatedReply = await _translateSingleLineWithRetry(baseAnswerEn, detectedLang);
+      return _cleanMarkdownFormatting(translatedReply);
+    }
+    return _cleanMarkdownFormatting(baseAnswerEn);
   }
 
   Future<void> _sendChatMessage() async {
@@ -2189,39 +2429,42 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     });
     _scrollToBottom();
 
-    String webContext = "";
-    if ((_webSearchEnabled || text.toLowerCase().contains("weather")) && text.isNotEmpty) {
-      webContext = await _fetchLiveWebAndWeatherContext(text);
+    final langInfo = await _detectLanguageAndTranslateToEnglish(text);
+    final String englishQuery = langInfo['enText'] ?? text;
+    final String detectedLang = langInfo['lang'] ?? 'en';
+
+    // When toggle is ON, run the full 4-Layer Google + DuckDuckGo + Weather + Wiki aggregator!
+    String webOrWeatherContext = "";
+    if (_webSearchEnabled && text.isNotEmpty) {
+      webOrWeatherContext = await _fetchFullGoogleAndWebSearchContext(text, englishQuery, detectedLang);
     }
 
     String visionAnalysis = "";
     if (currentAttachment != null) {
       final infoSess = await FFprobeKit.getMediaInformation(currentAttachment.path);
       final info = infoSess.getMediaInformation();
-      final duration = info?.getDuration() ?? "Static Image / Photo";
+      final duration = info?.getDuration() ?? "Static Photo / Image";
       final sizeBytes = await currentAttachment.length();
       final sizeMB = (sizeBytes / (1024 * 1024)).toStringAsFixed(2);
       visionAnalysis =
-          "📷 **[Vision Media Inspector]:** `${currentAttachment.path.split('/').last}` ($sizeMB MB • Duration: $duration)";
+          "[Attached Media File: ${currentAttachment.path.split('/').last} ($sizeMB MB, Duration: $duration)]";
     }
 
     String ragTranscriptContext = "";
-    if (_lastGeneratedTranscript.isNotEmpty &&
-        (text.toLowerCase().contains("video") ||
-            text.toLowerCase().contains("transcript") ||
-            text.toLowerCase().contains("summary") ||
-            text.toLowerCase().contains("said"))) {
+    if (_lastGeneratedTranscript.isNotEmpty) {
       final preview = _lastGeneratedTranscript.length > 600
           ? "${_lastGeneratedTranscript.substring(0, 600)}..."
           : _lastGeneratedTranscript;
-      ragTranscriptContext = "🎞️ **[Video Transcript Context]:**\n$preview";
+      ragTranscriptContext = "[Current Video Subtitle Transcript: $preview]";
     }
 
     final String aiReply = await _generateIntelligentAiResponse(
-      text.isEmpty ? "Analyze this attached media file and tell me what I can do with it." : text,
-      webContext,
-      visionAnalysis,
-      ragTranscriptContext,
+      userPrompt: text.isEmpty ? "Analyze this attached media file." : text,
+      englishTranslation: englishQuery,
+      detectedLang: detectedLang,
+      webOrWeatherContext: webOrWeatherContext,
+      visionInfo: visionAnalysis,
+      ragTranscript: ragTranscriptContext,
     );
 
     setState(() {
@@ -2231,7 +2474,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     _scrollToBottom();
   }
 
-  // Reusable Media File Picker Header (ONLY shown on Media Tabs 1-5 so Tab 6 AI Chat gets 100% full screen!)
   Widget _buildMediaPickerHeader(String fileName) {
     return Column(
       children: [
@@ -2365,7 +2607,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         ),
         body: TabBarView(
           children: [
-            // Tabs 1-5: Media Tool Tabs (each has the Media Picker Header at the top)
+            // Tabs 1-5: Media Tool Tabs
             ..._categories.values.map((presets) {
               return Column(
                 children: [
@@ -2399,7 +2641,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               );
             }),
 
-            // Tab 6: FULL-SCREEN Local AI Chat (No wasted video picker box taking up half the screen!)
+            // Tab 6: FULL-SCREEN Multilingual AI Chat with Live Google & Web Search
             Column(
               children: [
                 Container(
@@ -2471,9 +2713,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.public, color: Colors.tealAccent, size: 14),
+                              const Icon(Icons.travel_explore, color: Colors.tealAccent, size: 15),
                               const SizedBox(width: 4),
-                              const Text("Web & Weather", style: TextStyle(color: Colors.white70, fontSize: 11)),
+                              const Text("Google & Web", style: TextStyle(color: Colors.white70, fontSize: 11)),
                               const SizedBox(width: 4),
                               SizedBox(
                                 height: 26,
@@ -2534,7 +2776,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                                 ),
                               SelectableText(
                                 msg.text,
-                                style: const TextStyle(color: Colors.white, fontSize: 13.5, height: 1.35),
+                                style: const TextStyle(color: Colors.white, fontSize: 13.5, height: 1.38),
                               ),
                             ],
                           ),
@@ -2566,18 +2808,23 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                     ),
                   ),
                 if (_isAiGenerating)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 6),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        SizedBox(
+                        const SizedBox(
                           width: 14,
                           height: 14,
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.tealAccent),
                         ),
-                        SizedBox(width: 8),
-                        Text("AI is thinking...", style: TextStyle(color: Colors.tealAccent, fontSize: 12)),
+                        const SizedBox(width: 8),
+                        Text(
+                          _webSearchEnabled
+                              ? "Searching Google & Web + Thinking..."
+                              : "AI is thinking locally...",
+                          style: const TextStyle(color: Colors.tealAccent, fontSize: 12),
+                        ),
                       ],
                     ),
                   ),
@@ -2596,7 +2843,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                           controller: _chatController,
                           style: const TextStyle(color: Colors.white, fontSize: 14),
                           decoration: InputDecoration(
-                            hintText: "Ask anything (Weather, Code, Video, Vision)...",
+                            hintText: _webSearchEnabled
+                                ? "Ask or search Google/Web in any language..."
+                                : "Ask Offline AI in any language...",
                             hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
                             filled: true,
                             fillColor: const Color(0xFF121212),

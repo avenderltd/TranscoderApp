@@ -93,7 +93,7 @@ class ChatMessage {
 
 class AiModelOption {
   final String id;
-  final String tierCategory; // "Mobile", "Laptop / Gaming PC", "Workstation", "Supercomputer"
+  final String tierCategory;
   final String friendlyName;
   final String technicalName;
   final String sizeLabel;
@@ -148,9 +148,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   int _estimatedRamGB = 8;
   int _optimalThreads = 4;
   String _optimalPreset = "superfast";
-  String _recommendedModel = "Option 2 (1.5B) or Option 3 (3B)";
+  String _recommendedModel = "Models #1–#5 (Up to 7B)";
 
-  // Local AI Chat, Permanent Memory & Voice Call State
+  // Local AI Chat, Permanent Memory & Live Human Voice Call State
   final TextEditingController _chatController = TextEditingController();
   bool _webSearchEnabled = true;
   bool _autoVoiceReplyEnabled = true;
@@ -159,8 +159,17 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   bool _isSpeakingNow = false;
   bool _isAiGenerating = false;
 
+  // Hands-Free Full-Duplex "Live Voice Call" Mode State
+  bool _isLiveCallActive = false;
+  String _liveCallStatusText = "Tap 'Live Call' for hands-free human conversation";
+  StreamSubscription<Amplitude>? _amplitudeSub;
+  bool _userHasStartedSpeakingInTurn = false;
+  DateTime? _silenceStartedAt;
+  DateTime? _recordingStartedAt;
+  List<dynamic> _availableSystemVoices = [];
+
   File? _loadedGgufModel;
-  String _activeAiModelTitle = "DeepSeek-R1 Smart Logic & Coding (1.5B)";
+  String _activeAiModelTitle = "2. DeepSeek-R1 Smart Logic & Coding (1.5B)";
   bool _isDownloadingModel = false;
   double _modelDownloadProgress = 0.0;
   String _downloadingModelName = "";
@@ -171,7 +180,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     ChatMessage(
       sender: "ai",
       text:
-          "Hello! مرحباً! Hallo! 👋\n\nI have Permanent Memory and Live Human Voice Chat (tap the Mic button to talk with your voice, and I will talk back!).\n\nTap 'All 12 AI Brains' above to browse all models—from 0.5B phone models up to 671B Supercomputer models!",
+          "Hello! مرحباً! Hallo! 👋\n\nTap the green 📞 'LIVE CALL' button below to start a real-time, hands-free voice conversation with me—just talk naturally and I will listen, pause when you finish a sentence, and talk right back like a real human!\n\nI also remember everything you ever tell me in my Permanent Memory Vault.",
     )
   ];
 
@@ -186,7 +195,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       hardwareRequiredLabel: "✅ Runs on ANY Android Phone (2GB+ RAM)",
       whatItDoes: "An ultra-light AI brain that downloads in seconds and replies fast offline.",
       howItHelpsYou: "Best for quick everyday questions, grammar fixes, and short summaries.",
-      downloadUrl: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+      downloadUrl:
+          "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
       fileName: "qwen2.5-0.5b-instruct-q4_k_m.gguf",
       minCoresRecommended: 2,
       minRamGBRecommended: 2,
@@ -201,7 +211,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       hardwareRequiredLabel: "⭐ Best Match for Modern Phones (6GB+ RAM)",
       whatItDoes: "A reasoning AI that thinks step-by-step. Understands coding, math, and all languages.",
       howItHelpsYou: "Ideal for writing Flutter/Python/FFmpeg code and solving logic problems.",
-      downloadUrl: "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
+      downloadUrl:
+          "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
       fileName: "DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
       minCoresRecommended: 6,
       minRamGBRecommended: 6,
@@ -216,7 +227,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       hardwareRequiredLabel: "⭐ Best for Flagship Phones (8GB+ RAM)",
       whatItDoes: "Enhanced parameters for multilingual translation and scriptwriting.",
       howItHelpsYou: "Great for writing YouTube scripts and analyzing media transcripts.",
-      downloadUrl: "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
+      downloadUrl:
+          "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
       fileName: "qwen2.5-3b-instruct-q4_k_m.gguf",
       minCoresRecommended: 7,
       minRamGBRecommended: 8,
@@ -230,8 +242,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       minValidBytes: 1800 * 1024 * 1024,
       hardwareRequiredLabel: "⭐ Great for Flagship Phones & Laptops",
       whatItDoes: "Tuned for natural human dialogue and personal assistant tasks.",
-      howItHelpsYou: "Feels like talking to a real person during voice chat.",
-      downloadUrl: "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+      howItHelpsYou: "Feels like talking to a real person during live voice calls.",
+      downloadUrl:
+          "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
       fileName: "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
       minCoresRecommended: 7,
       minRamGBRecommended: 8,
@@ -246,7 +259,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       hardwareRequiredLabel: "💻 For Gaming Laptops (ASUS TUF / RTX)",
       whatItDoes: "A full 7B desktop-class reasoning brain.",
       howItHelpsYou: "Gives you software engineering and scientific reasoning.",
-      downloadUrl: "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
+      downloadUrl:
+          "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
       fileName: "DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
       minCoresRecommended: 8,
       minRamGBRecommended: 12,
@@ -261,7 +275,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       hardwareRequiredLabel: "💻 Requires PC with 16GB+ RAM & GPU",
       whatItDoes: "World-class open-weights coding model across 92 languages.",
       howItHelpsYou: "Architects apps and debugs complex stack traces offline.",
-      downloadUrl: "https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct-GGUF/resolve/main/qwen2.5-coder-14b-instruct-q4_k_m.gguf",
+      downloadUrl:
+          "https://huggingface.co/Qwen/Qwen2.5-Coder-14B-Instruct-GGUF/resolve/main/qwen2.5-coder-14b-instruct-q4_k_m.gguf",
       fileName: "qwen2.5-coder-14b-instruct-q4_k_m.gguf",
       minCoresRecommended: 10,
       minRamGBRecommended: 16,
@@ -276,7 +291,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       hardwareRequiredLabel: "🖥️ Requires Workstation (24GB+ RAM / RTX 3090)",
       whatItDoes: "European powerhouse with mastery of German, French, and English.",
       howItHelpsYou: "Delivers GPT-4o quality translations and legal/financial analysis.",
-      downloadUrl: "https://huggingface.co/bartowski/Mistral-Small-24B-Instruct-2501-GGUF/resolve/main/Mistral-Small-24B-Instruct-2501-Q4_K_M.gguf",
+      downloadUrl:
+          "https://huggingface.co/bartowski/Mistral-Small-24B-Instruct-2501-GGUF/resolve/main/Mistral-Small-24B-Instruct-2501-Q4_K_M.gguf",
       fileName: "Mistral-Small-24B-Instruct-2501-Q4_K_M.gguf",
       minCoresRecommended: 12,
       minRamGBRecommended: 24,
@@ -291,7 +307,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       hardwareRequiredLabel: "🖥️ Requires Workstation PC (32GB+ RAM)",
       whatItDoes: "Outperforms OpenAI o1-mini on math and advanced science.",
       howItHelpsYou: "Built for deep-tech founders and researchers.",
-      downloadUrl: "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-32B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-32B-Q4_K_M.gguf",
+      downloadUrl:
+          "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-32B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-32B-Q4_K_M.gguf",
       fileName: "DeepSeek-R1-Distill-Qwen-32B-Q4_K_M.gguf",
       minCoresRecommended: 14,
       minRamGBRecommended: 32,
@@ -306,7 +323,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       hardwareRequiredLabel: "🖥️ Requires Dual-GPU Workstation / 64GB+ RAM",
       whatItDoes: "Datacenter flagship matching 400B+ models in evaluation.",
       howItHelpsYou: "Turns a 64GB+ workstation into a private corporate server.",
-      downloadUrl: "https://huggingface.co/bartowski/Llama-3.3-70B-Instruct-GGUF/resolve/main/Llama-3.3-70B-Instruct-Q4_K_M.gguf",
+      downloadUrl:
+          "https://huggingface.co/bartowski/Llama-3.3-70B-Instruct-GGUF/resolve/main/Llama-3.3-70B-Instruct-Q4_K_M.gguf",
       fileName: "Llama-3.3-70B-Instruct-Q4_K_M.gguf",
       minCoresRecommended: 16,
       minRamGBRecommended: 64,
@@ -321,7 +339,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       hardwareRequiredLabel: "🖥️ Requires 64GB–128GB RAM Server",
       whatItDoes: "72B parameters of world knowledge with a 128K context window.",
       howItHelpsYou: "Reads entire books or long movie transcripts in a single prompt.",
-      downloadUrl: "https://huggingface.co/Qwen/Qwen2.5-72B-Instruct-GGUF/resolve/main/qwen2.5-72b-instruct-q4_k_m-00001-of-00012.gguf",
+      downloadUrl:
+          "https://huggingface.co/Qwen/Qwen2.5-72B-Instruct-GGUF/resolve/main/qwen2.5-72b-instruct-q4_k_m-00001-of-00012.gguf",
       fileName: "qwen2.5-72b-instruct-q4_k_m.gguf",
       minCoresRecommended: 16,
       minRamGBRecommended: 64,
@@ -692,10 +711,340 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   void initState() {
     super.initState();
     FFmpegKitConfig.setFontDirectoryList(["/system/fonts", "/system/font"], {});
+    _initHumanNeuralTts();
     _analyzeDeviceHardware();
     _loadPermanentMemoryFromDisk();
     _checkAlreadyDownloadedModels();
     _setupShareIntent();
+  }
+
+  // ============================================================================
+  // 1. HUMAN-LIKE NEURAL TTS ENGINE INITIALIZER
+  // Automatically locks onto Google's highest-quality Neural/Wavenet voices!
+  // ============================================================================
+  Future<void> _initHumanNeuralTts() async {
+    try {
+      await _flutterTts.awaitSpeakCompletion(true);
+      if (Platform.isAndroid) {
+        try {
+          await _flutterTts.setEngine("com.google.android.tts");
+        } catch (_) {}
+      }
+      final voices = await _flutterTts.getVoices;
+      if (voices is List) {
+        _availableSystemVoices = voices;
+      }
+    } catch (_) {}
+  }
+
+  // Selects the most natural, human-sounding Neural/Network voice for the given language & gender
+  Future<void> _selectBestHumanVoiceForLanguage(String langCode) async {
+    final String cleanLang = (langCode == 'same' || langCode.isEmpty || langCode == 'auto') ? 'en' : langCode.split('-').first.toLowerCase();
+
+    try {
+      String fullLocale = cleanLang;
+      if (cleanLang == 'en') fullLocale = 'en-US';
+      if (cleanLang == 'ar') fullLocale = 'ar-XA';
+      if (cleanLang == 'de') fullLocale = 'de-DE';
+      if (cleanLang == 'fr') fullLocale = 'fr-FR';
+      if (cleanLang == 'es') fullLocale = 'es-ES';
+      if (cleanLang == 'tr') fullLocale = 'tr-TR';
+
+      await _flutterTts.setLanguage(fullLocale);
+
+      if (_availableSystemVoices.isNotEmpty) {
+        Map<String, String>? bestNeuralVoice;
+        for (final v in _availableSystemVoices) {
+          if (v is Map) {
+            final String name = (v['name'] ?? '').toString().toLowerCase();
+            final String locale = (v['locale'] ?? '').toString().toLowerCase();
+            if (locale.startsWith(cleanLang)) {
+              // Prefer high-definition network/wavenet/neural voices over flat local voices
+              final bool isNeural = name.contains('network') || name.contains('wavenet') || name.contains('neural') || name.contains(' local') == false;
+              final bool matchesGender = (_aiVoiceGender == 'male')
+                  ? (name.contains('male') || name.contains('-b-') || name.contains('-d-') || name.contains('iom') || name.contains('ard'))
+                  : (name.contains('female') || name.contains('-a-') || name.contains('-c-') || name.contains('-f-'));
+
+              if (isNeural && matchesGender) {
+                bestNeuralVoice = {'name': v['name'].toString(), 'locale': v['locale'].toString()};
+                break;
+              } else if (isNeural && bestNeuralVoice == null) {
+                bestNeuralVoice = {'name': v['name'].toString(), 'locale': v['locale'].toString()};
+              }
+            }
+          }
+        }
+        if (bestNeuralVoice != null) {
+          await _flutterTts.setVoice(bestNeuralVoice);
+        }
+      }
+
+      // Natural human vocal formant & conversational pacing (not robotic 0.50!)
+      await _flutterTts.setPitch(_aiVoiceGender == "male" ? 0.92 : 1.02);
+      await _flutterTts.setSpeechRate(0.54);
+      await _flutterTts.setVolume(1.0);
+    } catch (_) {}
+  }
+
+  // Speaks response sentence-by-sentence with natural human cadence & micro-pauses!
+  Future<void> _speakAiResponseAloud(String text, String langCode) async {
+    final String cleanSpeech = text
+        .replaceAll(RegExp(r'```[\s\S]*?```'), 'I have written the code for you on screen.')
+        .replaceAll(RegExp(r'https?:\/\/\S+'), '')
+        .replaceAll(RegExp(r'[#*`_~>•]'), '')
+        .trim();
+    if (cleanSpeech.isEmpty) return;
+
+    setState(() => _isSpeakingNow = true);
+    try {
+      await _flutterTts.stop();
+      await _selectBestHumanVoiceForLanguage(langCode);
+
+      // Split into natural conversational sentences so the voice breathes and inflects like a real human!
+      final List<String> sentences = cleanSpeech
+          .split(RegExp(r'(?<=[.!?؟۔\n])\s+'))
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+
+      for (int i = 0; i < sentences.length; i++) {
+        if (!_isSpeakingNow || !mounted) break;
+        // Subtle human pitch micro-variation across sentences
+        final double dynamicPitch = (_aiVoiceGender == "male" ? 0.91 : 1.01) + ((i % 2) * 0.02);
+        await _flutterTts.setPitch(dynamicPitch);
+        await _flutterTts.speak(sentences[i]);
+        if (i + 1 < sentences.length && _isSpeakingNow) {
+          await Future.delayed(const Duration(milliseconds: 110));
+        }
+      }
+    } catch (_) {}
+
+    if (mounted) {
+      setState(() => _isSpeakingNow = false);
+      // If we are in Hands-Free Live Call Mode, automatically start listening to the user's next turn right away!
+      if (_isLiveCallActive && !_isAiGenerating && !_isRecordingVoice) {
+        _startHandsFreeListeningTurn();
+      }
+    }
+  }
+
+  Future<void> _stopSpeaking() async {
+    setState(() => _isSpeakingNow = false);
+    await _flutterTts.stop();
+  }
+
+  // ============================================================================
+  // 2. HANDS-FREE FULL-DUPLEX "LIVE VOICE CALL" ENGINE (Auto-Silence Detection!)
+  // ============================================================================
+  Future<void> _toggleLiveCallMode() async {
+    if (_isLiveCallActive) {
+      // End Live Call
+      await _amplitudeSub?.cancel();
+      _amplitudeSub = null;
+      if (_isRecordingVoice) {
+        try {
+          await _voiceRecorder.stop();
+        } catch (_) {}
+      }
+      await _stopSpeaking();
+      setState(() {
+        _isLiveCallActive = false;
+        _isRecordingVoice = false;
+        _liveCallStatusText = "Live Call ended";
+      });
+      return;
+    }
+
+    // Start Hands-Free Live Call
+    final bool hasPerm = await _voiceRecorder.hasPermission();
+    if (!hasPerm) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Please allow Microphone permission to start a Live Voice Call!")),
+        );
+      }
+      return;
+    }
+
+    setState(() {
+      _isLiveCallActive = true;
+      _autoVoiceReplyEnabled = true;
+      _liveCallStatusText = "📞 Live Call Connected • Speak anytime!";
+    });
+
+    await _startHandsFreeListeningTurn();
+  }
+
+  // Automatically listens to user's voice and detects when they finish a sentence (1.3s silence after speech)
+  Future<void> _startHandsFreeListeningTurn() async {
+    if (!_isLiveCallActive || _isAiGenerating) return;
+    if (_isSpeakingNow) {
+      await _stopSpeaking();
+    }
+
+    try {
+      await _amplitudeSub?.cancel();
+      final tempDir = await getTemporaryDirectory();
+      final recWavPath = '${tempDir.path}/live_call_turn.wav';
+
+      _userHasStartedSpeakingInTurn = false;
+      _silenceStartedAt = null;
+      _recordingStartedAt = DateTime.now();
+
+      // Record directly as 16kHz Mono WAV so Whisper C++ reads it instantaneously without FFmpeg conversion delay!
+      await _voiceRecorder.start(
+        RecordConfig(
+          encoder: AudioEncoder.wav,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
+        path: recWavPath,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _isRecordingVoice = true;
+        _liveCallStatusText = "🎙️ Listening to you... (Speak naturally)";
+      });
+
+      // Monitor microphone volume every 120ms for automatic hands-free turn-taking
+      _amplitudeSub = _voiceRecorder.onAmplitudeChanged(const Duration(milliseconds: 120)).listen((amp) async {
+        if (!_isLiveCallActive || !_isRecordingVoice) return;
+        final double db = amp.current;
+
+        // Above -33 dB means user is actively speaking
+        if (db > -33.0) {
+          if (!_userHasStartedSpeakingInTurn) {
+            _userHasStartedSpeakingInTurn = true;
+            if (mounted) {
+              setState(() => _liveCallStatusText = "🗣️ Hearing your voice...");
+            }
+          }
+          _silenceStartedAt = null;
+        } else {
+          // User is silent right now
+          if (_userHasStartedSpeakingInTurn) {
+            _silenceStartedAt ??= DateTime.now();
+            final int silentMs = DateTime.now().difference(_silenceStartedAt!).inMilliseconds;
+            // As soon as user pauses for 1.3 seconds after speaking, auto-send to AI!
+            if (silentMs >= 1300) {
+              await _finishHandsFreeTurnAndReply();
+            }
+          } else if (_recordingStartedAt != null &&
+              DateTime.now().difference(_recordingStartedAt!).inSeconds >= 25) {
+            // Restart fresh buffer if 25 seconds passed with no speech
+            await _restartSilentListeningBuffer();
+          }
+        }
+      });
+    } catch (_) {
+      if (mounted) setState(() => _isRecordingVoice = false);
+    }
+  }
+
+  Future<void> _restartSilentListeningBuffer() async {
+    if (!_isLiveCallActive || !_isRecordingVoice) return;
+    try {
+      await _amplitudeSub?.cancel();
+      await _voiceRecorder.stop();
+      setState(() => _isRecordingVoice = false);
+      if (_isLiveCallActive && !_isAiGenerating) {
+        await _startHandsFreeListeningTurn();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _finishHandsFreeTurnAndReply() async {
+    if (!_isRecordingVoice) return;
+    await _amplitudeSub?.cancel();
+    _amplitudeSub = null;
+
+    try {
+      final String? recordedWavPath = await _voiceRecorder.stop();
+      if (!mounted) return;
+      setState(() {
+        _isRecordingVoice = false;
+        _isAiGenerating = true;
+        _liveCallStatusText = "⚡ Processing your voice...";
+      });
+
+      if (recordedWavPath == null || !await File(recordedWavPath).exists()) {
+        setState(() => _isAiGenerating = false);
+        if (_isLiveCallActive) await _startHandsFreeListeningTurn();
+        return;
+      }
+
+      final whisper = Whisper(
+        model: WhisperModel.base,
+        downloadHost: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main",
+      );
+
+      final res = await whisper.transcribe(
+        transcribeRequest: TranscribeRequest(
+          audio: recordedWavPath,
+          language: "auto",
+          isTranslate: false,
+          isNoTimestamps: true,
+          splitOnWord: false,
+        ),
+      );
+
+      final String spokenText = res.text
+          .replaceAll(RegExp(r'\[.*?\]|\(.*?\)'), '')
+          .trim();
+
+      if (spokenText.length >= 2) {
+        _chatController.text = spokenText;
+        setState(() {
+          _isAiGenerating = false;
+          _liveCallStatusText = "🧠 Thinking & replying aloud...";
+        });
+        await _sendChatMessage(forceVoiceReply: true, isFromLiveCall: true);
+      } else {
+        setState(() => _isAiGenerating = false);
+        if (_isLiveCallActive) {
+          await _startHandsFreeListeningTurn();
+        }
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isAiGenerating = false);
+      if (_isLiveCallActive) await _startHandsFreeListeningTurn();
+    }
+  }
+
+  // Single-Tap Mic Button (for manual push-to-talk if not in hands-free Live Call mode)
+  Future<void> _toggleSingleVoiceNoteRecording() async {
+    if (_isSpeakingNow) {
+      await _stopSpeaking();
+    }
+
+    if (_isRecordingVoice) {
+      await _finishHandsFreeTurnAndReply();
+    } else {
+      try {
+        if (await _voiceRecorder.hasPermission()) {
+          final tempDir = await getTemporaryDirectory();
+          final recWavPath = '${tempDir.path}/manual_voice_note.wav';
+          await _voiceRecorder.start(
+            RecordConfig(
+              encoder: AudioEncoder.wav,
+              sampleRate: 16000,
+              numChannels: 1,
+            ),
+            path: recWavPath,
+          );
+          setState(() => _isRecordingVoice = true);
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("Please grant Microphone permission!")),
+            );
+          }
+        }
+      } catch (_) {
+        setState(() => _isRecordingVoice = false);
+      }
+    }
   }
 
   Future<File> _getMemoryFile() async {
@@ -769,120 +1118,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         if (_permanentMemoryFacts.length > 80) {
           _permanentMemoryFacts.removeAt(0);
         }
-      }
-    }
-  }
-
-  Future<void> _speakAiResponseAloud(String text, String langCode) async {
-    final String cleanSpeech = text
-        .replaceAll(RegExp(r'```[\s\S]*?```'), 'Code block generated.')
-        .replaceAll(RegExp(r'https?:\/\/\S+'), '')
-        .replaceAll(RegExp(r'[#*`_~>•]'), '')
-        .trim();
-    if (cleanSpeech.isEmpty) return;
-
-    setState(() => _isSpeakingNow = true);
-    try {
-      final String ttsLang = (langCode == 'same' || langCode.isEmpty) ? 'en' : langCode;
-      await _flutterTts.stop();
-      await _flutterTts.setLanguage(ttsLang);
-      await _flutterTts.setPitch(_aiVoiceGender == "male" ? 0.85 : 1.03);
-      await _flutterTts.setSpeechRate(0.51);
-
-      _flutterTts.setCompletionHandler(() {
-        if (mounted) setState(() => _isSpeakingNow = false);
-      });
-      _flutterTts.setErrorHandler((_) {
-        if (mounted) setState(() => _isSpeakingNow = false);
-      });
-
-      await _flutterTts.speak(cleanSpeech);
-    } catch (_) {
-      if (mounted) setState(() => _isSpeakingNow = false);
-    }
-  }
-
-  Future<void> _stopSpeaking() async {
-    await _flutterTts.stop();
-    if (mounted) setState(() => _isSpeakingNow = false);
-  }
-
-  Future<void> _toggleLiveVoiceRecording() async {
-    if (_isSpeakingNow) {
-      await _stopSpeaking();
-    }
-
-    if (_isRecordingVoice) {
-      try {
-        final String? recordedPath = await _voiceRecorder.stop();
-        setState(() {
-          _isRecordingVoice = false;
-          _isAiGenerating = true;
-        });
-
-        if (recordedPath == null || !await File(recordedPath).exists()) {
-          setState(() => _isAiGenerating = false);
-          return;
-        }
-
-        final tempDir = await getTemporaryDirectory();
-        final wav16kPath = '${tempDir.path}/voice_chat_16k.wav';
-        await FFmpegKit.execute('-y -i "$recordedPath" -ar 16000 -ac 1 -c:a pcm_s16le "$wav16kPath"');
-
-        final whisper = Whisper(
-          model: WhisperModel.base,
-          downloadHost: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main",
-        );
-
-        final res = await whisper.transcribe(
-          transcribeRequest: TranscribeRequest(
-            audio: wav16kPath,
-            language: "auto",
-            isTranslate: false,
-            isNoTimestamps: true,
-            splitOnWord: false,
-          ),
-        );
-
-        final String spokenText = res.text.trim();
-        if (spokenText.isNotEmpty) {
-          _chatController.text = spokenText;
-          setState(() => _isAiGenerating = false);
-          await _sendChatMessage(forceVoiceReply: true);
-        } else {
-          setState(() {
-            _isAiGenerating = false;
-            _messages.add(ChatMessage(
-              sender: "ai",
-              text: "🎙️ I didn't catch any speech in that recording. Tap the mic and speak clearly!",
-            ));
-          });
-        }
-      } catch (e) {
-        setState(() {
-          _isRecordingVoice = false;
-          _isAiGenerating = false;
-        });
-      }
-    } else {
-      try {
-        if (await _voiceRecorder.hasPermission()) {
-          final tempDir = await getTemporaryDirectory();
-          final recPath = '${tempDir.path}/live_voice_input.m4a';
-          await _voiceRecorder.start(
-            const RecordConfig(encoder: AudioEncoder.aacLc, sampleRate: 16000, numChannels: 1),
-            path: recPath,
-          );
-          setState(() => _isRecordingVoice = true);
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Please grant Microphone permission to use Live Voice Chat!")),
-            );
-          }
-        }
-      } catch (e) {
-        setState(() => _isRecordingVoice = false);
       }
     }
   }
@@ -1077,7 +1312,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           _messages.add(ChatMessage(
             sender: "ai",
             text:
-                "⏸️ Download paused at ${(finalBytes / (1024 * 1024)).toStringAsFixed(0)} MB. Tap 'Download Offline' again to resume right where it left off!",
+                "⏸️ Download paused at ${(finalBytes / (1024 * 1024)).toStringAsFixed(0)} MB. Tap 'Download' again to resume right where it left off!",
           ));
         });
       }
@@ -1089,7 +1324,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         _isDownloadingModel = false;
         _messages.add(ChatMessage(
           sender: "ai",
-          text: "⏸️ Network connection paused. Tap 'Download Offline' again to auto-resume.",
+          text: "⏸️ Network connection paused. Tap 'Download' again to auto-resume.",
         ));
       });
       if (modalSetState != null) modalSetState(() {});
@@ -1506,6 +1741,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
   @override
   void dispose() {
+    _amplitudeSub?.cancel();
     _voiceRecorder.dispose();
     _flutterTts.stop();
     _chatController.dispose();
@@ -1728,9 +1964,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         if (!ttsCompleter.isCompleted) ttsCompleter.complete(false);
       });
 
-      await _flutterTts.setLanguage(cleanLang);
-      await _flutterTts.setPitch(voiceGender == "male" ? 0.82 : 1.04);
-      await _flutterTts.setSpeechRate(0.5);
+      await _selectBestHumanVoiceForLanguage(cleanLang);
+      await _flutterTts.setPitch(voiceGender == "male" ? 0.88 : 1.02);
+      await _flutterTts.setSpeechRate(0.52);
 
       await _flutterTts.synthesizeToFile(text, outRawPath);
       await ttsCompleter.future.timeout(const Duration(seconds: 7), onTimeout: () => false);
@@ -2545,7 +2781,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         }
       });
     } catch (e) {
-      setState(() {
+           setState(() {
         _isProcessing = false;
         _statusMessage = "Whisper Error: $e";
       });
@@ -2924,6 +3160,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     required String backgroundKnowledge,
     required String visionInfo,
     required String ragTranscript,
+    required bool isFromLiveCall,
   }) async {
     final String modelPersona = _activeAiModelTitle;
 
@@ -2940,11 +3177,11 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
     final List<Map<String, String>> chatHistory = [];
     final String systemInstruction =
-        "You are $modelPersona, a world-class, warm, human-like AI assistant inside Pro Media Studio on $_hardwareTierBadge. "
+        "You are $modelPersona, a warm, empathetic, human-sounding AI companion and assistant inside Pro Media Studio on $_hardwareTierBadge. "
         "CRITICAL RULES:\n"
         "1. Always reply in the EXACT SAME LANGUAGE as the user's message (if Arabic, reply in fluent, natural Arabic; if German, reply in German; if English, reply in English).\n"
-        "2. You have 100% PERMANENT INFINITE MEMORY. Never say you forget conversations—use the PERMANENT MEMORY VAULT and chat history below to remember the user's name, projects, preferences, and everything they ever told you!\n"
-        "3. Talk like a real, intelligent human speaking face-to-face. Never dump raw search links or newspaper headlines.\n"
+        "2. ${isFromLiveCall ? 'You are currently in a LIVE VOICE PHONE CALL with the user! Keep your spoken reply natural, warm, conversational, and concise (2 to 4 sentences) like a real human talking on the phone.' : 'Talk like a real, intelligent human speaking face-to-face. Never dump raw search links or newspaper headlines.'}\n"
+        "3. You have 100% PERMANENT INFINITE MEMORY. Use the PERMANENT MEMORY VAULT and chat history below to remember the user's name, projects, preferences, and everything they ever told you.\n"
         "4. Understand typos effortlessly (e.g., 'سترت البقلنسوه' = 'سترة بقلنسوة' / Hoodie / هودي) and explain clearly right away.\n"
         "5. Do not use raw markdown double-asterisks (**).\n"
         "${memoryVaultBuffer.toString()}"
@@ -2983,7 +3220,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               body: jsonEncode({
                 'model': modelName,
                 'messages': chatHistory,
-                'temperature': 0.5,
+                'temperature': 0.6,
               }),
             )
             .timeout(const Duration(seconds: 14));
@@ -3033,7 +3270,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     return fallbackMsg;
   }
 
-  Future<void> _sendChatMessage({bool forceVoiceReply = false}) async {
+  Future<void> _sendChatMessage({bool forceVoiceReply = false, bool isFromLiveCall = false}) async {
     final text = _chatController.text.trim();
     if (text.isEmpty && _attachedVisionFile == null) return;
     if (_isAiGenerating) return;
@@ -3105,16 +3342,20 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       backgroundKnowledge: backgroundKnowledge,
       visionInfo: visionAnalysis,
       ragTranscript: ragTranscriptContext,
+      isFromLiveCall: isFromLiveCall || _isLiveCallActive,
     );
 
     setState(() {
       _messages.add(ChatMessage(sender: "ai", text: aiReply));
       _isAiGenerating = false;
+      if (_isLiveCallActive) {
+        _liveCallStatusText = "🔊 AI is talking to you...";
+      }
     });
     await _savePermanentMemoryToDisk();
     _scrollToBottom();
 
-    if (_autoVoiceReplyEnabled || forceVoiceReply) {
+    if (_autoVoiceReplyEnabled || forceVoiceReply || _isLiveCallActive) {
       await _speakAiResponseAloud(aiReply, detectedLang);
     }
   }
@@ -3246,7 +3487,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               Tab(text: "Subtitles & Dubbing"),
               Tab(text: "Speed, FPS & GIF"),
               Tab(text: "Audio & Formats"),
-              Tab(text: "🤖 Local AI & Voice"),
+              Tab(text: "🤖 Local AI & Live Call"),
             ],
           ),
         ),
@@ -3285,6 +3526,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               );
             }),
 
+            // Tab 6: FULL-SCREEN Conversational AI + Hands-Free Live Voice Call + 12-Tier Brain Store
             Column(
               children: [
                 Container(
@@ -3293,7 +3535,10 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                   decoration: BoxDecoration(
                     color: const Color(0xFF1E1E1E),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white12),
+                    border: Border.all(
+                      color: _isLiveCallActive ? Colors.greenAccent : Colors.white12,
+                      width: _isLiveCallActive ? 1.5 : 1.0,
+                    ),
                   ),
                   child: Column(
                     children: [
@@ -3346,43 +3591,66 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              InkWell(
-                                onTap: () {
-                                  setState(() {
-                                    _aiVoiceGender = _aiVoiceGender == "female" ? "male" : "female";
-                                  });
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white10,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    _aiVoiceGender == "female" ? "👩 Female Voice" : "👨 Male Voice",
-                                    style: const TextStyle(color: Colors.tealAccent, fontSize: 10.5, fontWeight: FontWeight.bold),
-                                  ),
+                          // HANDS-FREE LIVE CALL BUTTON (Talk back-and-forth without pressing buttons!)
+                          InkWell(
+                            onTap: _toggleLiveCallMode,
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: _isLiveCallActive
+                                    ? Colors.redAccent.withOpacity(0.25)
+                                    : Colors.greenAccent.withOpacity(0.18),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: _isLiveCallActive ? Colors.redAccent : Colors.greenAccent,
                                 ),
                               ),
-                              const SizedBox(width: 6),
-                              const Text("Voice Reply", style: TextStyle(color: Colors.white70, fontSize: 10.5)),
-                              SizedBox(
-                                height: 24,
-                                child: Switch(
-                                  value: _autoVoiceReplyEnabled,
-                                  activeColor: Colors.tealAccent,
-                                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                  onChanged: (val) {
-                                    setState(() => _autoVoiceReplyEnabled = val);
-                                    if (!val) _stopSpeaking();
-                                  },
-                                ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    _isLiveCallActive ? Icons.call_end_rounded : Icons.phone_in_talk_rounded,
+                                    color: _isLiveCallActive ? Colors.redAccent : Colors.greenAccent,
+                                    size: 15,
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    _isLiveCallActive ? "END LIVE CALL" : "LIVE VOICE CALL",
+                                    style: TextStyle(
+                                      color: _isLiveCallActive ? Colors.redAccent : Colors.greenAccent,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
+                            ),
                           ),
+                          // Female / Male Human Neural Voice Selector
+                          InkWell(
+                            onTap: () {
+                              setState(() {
+                                _aiVoiceGender = _aiVoiceGender == "female" ? "male" : "female";
+                              });
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.white10,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                _aiVoiceGender == "female" ? "👩 Human Female" : "👨 Human Male",
+                                style: const TextStyle(
+                                  color: Colors.tealAccent,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Web Search Toggle
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -3405,6 +3673,36 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                     ],
                   ),
                 ),
+                // Live Call Active Banner (Shows real-time listening/thinking/speaking state!)
+                if (_isLiveCallActive)
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.greenAccent.withOpacity(0.5)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.graphic_eq, color: Colors.greenAccent, size: 18),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            _liveCallStatusText,
+                            style: const TextStyle(
+                              color: Colors.greenAccent,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 Expanded(
                   child: ListView.builder(
                     controller: _chatScrollController,
@@ -3480,15 +3778,20 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                             Icon(Icons.spatial_audio_off, color: Colors.tealAccent, size: 16),
                             SizedBox(width: 8),
                             Text(
-                              "AI is speaking aloud...",
+                              "AI is speaking naturally...",
                               style: TextStyle(color: Colors.tealAccent, fontSize: 12, fontWeight: FontWeight.bold),
                             ),
                           ],
                         ),
                         TextButton.icon(
                           icon: const Icon(Icons.stop_circle_outlined, color: Colors.redAccent, size: 16),
-                          label: const Text("Stop Voice", style: TextStyle(color: Colors.redAccent, fontSize: 11)),
-                          onPressed: _stopSpeaking,
+                          label: const Text("Interrupt / Stop", style: TextStyle(color: Colors.redAccent, fontSize: 11)),
+                          onPressed: () async {
+                            await _stopSpeaking();
+                            if (_isLiveCallActive) {
+                              await _startHandsFreeListeningTurn();
+                            }
+                          },
                         ),
                       ],
                     ),
@@ -3515,22 +3818,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                       ],
                     ),
                   ),
-                if (_isRecordingVoice)
-                  Container(
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                    color: Colors.redAccent.withOpacity(0.2),
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.mic, color: Colors.redAccent, size: 18),
-                        SizedBox(width: 8),
-                        Text(
-                          "Listening to your voice... Tap Mic again to send!",
-                          style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 12.5),
-                        ),
-                      ],
-                    ),
-                  ),
                 if (_isAiGenerating)
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 6),
@@ -3544,7 +3831,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         ),
                         SizedBox(width: 8),
                         Text(
-                          "AI is thinking with Permanent Memory...",
+                          "AI is thinking...",
                           style: TextStyle(color: Colors.tealAccent, fontSize: 12),
                         ),
                       ],
@@ -3561,7 +3848,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         onPressed: _pickVisionAttachment,
                       ),
                       GestureDetector(
-                        onTap: _toggleLiveVoiceRecording,
+                        onTap: _toggleSingleVoiceNoteRecording,
                         child: Container(
                           margin: const EdgeInsets.only(right: 6),
                           padding: const EdgeInsets.all(10),
@@ -3585,9 +3872,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                           controller: _chatController,
                           style: const TextStyle(color: Colors.white, fontSize: 14),
                           decoration: InputDecoration(
-                            hintText: _isRecordingVoice
-                                ? "Speaking... Tap red stop button when done"
-                                : "Type or tap 🎙️ to talk in any language...",
+                            hintText: _isLiveCallActive
+                                ? "Hands-Free Live Call active (just speak!)"
+                                : "Type or tap 📞 Live Call to talk hands-free...",
                             hintStyle: const TextStyle(color: Colors.white38, fontSize: 12.5),
                             filled: true,
                             fillColor: const Color(0xFF121212),

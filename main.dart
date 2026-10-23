@@ -5775,9 +5775,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           LlamaGenerateCommand(
             prompt: localPrompt.toString(),
             maxTokens: isFromLiveCall ? 140 : 380,
-            temperature: 0.6,
-            topP: 0.9,
-            stop: const ['<|im_end|>', '<|endoftext|>'],
           ),
           const LlamaDisposeCommand(),
         ]);

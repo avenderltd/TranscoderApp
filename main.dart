@@ -2243,10 +2243,11 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         await _bindBestSystemNeuralVoice(cleanLang, voiceGender);
         await _flutterTts.setPitch(1.0);
         await _flutterTts.setSpeechRate(0.51);
+        await _flutterTts.awaitSynthCompletion(true);
 
         await _flutterTts
-            .synthesizeToFile(text, wavFallbackPath)
-            .timeout(const Duration(seconds: 8), onTimeout: () => 0);
+            .synthesizeToFile(text, wavFallbackPath, true)
+            .timeout(const Duration(seconds: 25), onTimeout: () => 0);
         await Future.delayed(const Duration(milliseconds: 150));
         if (await File(wavFallbackPath).exists() &&
             await File(wavFallbackPath).length() > 350) {

@@ -3377,7 +3377,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         transcribeRequest: TranscribeRequest(
           audio: audioForWhisper,
           language: _preferredSpokenLang,
-          isTranslate: targetLangCode.toLowerCase().startsWith('en'),
+          isTranslate: _targetLang.toLowerCase().startsWith('en'),
           isNoTimestamps: true,
           splitOnWord: false,
         ),
@@ -4798,7 +4798,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         transcribeRequest: TranscribeRequest(
           audio: tempWavPath,
           language: "auto",
-          isTranslate: targetLangCode.toLowerCase().startsWith('en'),
+          isTranslate: _targetLang.toLowerCase().startsWith('en'),
           isNoTimestamps: false,
           splitOnWord: false,
         ),
@@ -5494,7 +5494,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         transcribeRequest: TranscribeRequest(
           audio: tempWavPath,
           language: "auto",
-          isTranslate: targetLangCode.toLowerCase().startsWith('en'),
+          isTranslate: _targetLang.toLowerCase().startsWith('en'),
           isNoTimestamps: false,
           splitOnWord: false,
         ),
@@ -5796,7 +5796,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         transcribeRequest: TranscribeRequest(
           audio: tempWavPath,
           language: "auto",
-          isTranslate: targetLangCode.toLowerCase().startsWith('en'),
+          isTranslate: _targetLang.toLowerCase().startsWith('en'),
           isNoTimestamps: false,
           splitOnWord: false,
         ),

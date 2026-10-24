@@ -6443,7 +6443,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   // ============================================================================
   // HYBRID LOCAL .GGUF (`lib_llama_cpp`) + MULTI-PROVIDER CLOUD + OFFLINE ASSISTANT
   // ============================================================================
-  Future<String> _generateIntelligentAiResponse({
+    Future<String> _generateIntelligentAiResponse({
     required String userPrompt,
     required String contextualPrompt,
     required String englishTranslation,
@@ -6501,109 +6501,127 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       'content': finalUserMessage,
     });
 
-    // --------------------------------------------------------------------------
-    // 1. MULTI-PROVIDER CLOUD AI (LLM7.io + Pollinations 32-Bit Seed POST + GET)
-    // --------------------------------------------------------------------------
+    // Quick 1.5-second check to see if Wi-Fi / Mobile Data is active
+    bool hasInternet = false;
     try {
-      final llm7Resp = await http
-          .post(
-            Uri.parse('https://api.llm7.io/v1/chat/completions'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer unused',
-            },
-            body: jsonEncode({
-              'model': 'default',
-              'messages': chatHistory,
-              'temperature': 0.6,
-            }),
-          )
-          .timeout(const Duration(seconds: 9));
-
-      if (llm7Resp.statusCode == 200) {
-        final decoded = jsonDecode(utf8.decode(llm7Resp.bodyBytes));
-        final String? content =
-            decoded['choices']?[0]?['message']?['content'];
-        if (content != null && content.trim().isNotEmpty) {
-          final String cleaned = _cleanMarkdownFormatting(content);
-          if (cleaned.isNotEmpty) return cleaned;
-        }
+      final lookup = await InternetAddress.lookup('api.llm7.io')
+          .timeout(const Duration(milliseconds: 1500));
+      if (lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty) {
+        hasInternet = true;
       }
-    } catch (_) {}
+    } catch (_) {
+      hasInternet = false;
+    }
 
-    final List<String> modelsToTry = [
-      'openai',
-      'openai-fast',
-      'mistral',
-      'qwen-coder',
-    ];
-
-    for (int attempt = 0; attempt < modelsToTry.length; attempt++) {
-      final String modelName = modelsToTry[attempt];
-      final int safe32BitSeed =
-          (DateTime.now().millisecondsSinceEpoch % 900000) + attempt;
+    // --------------------------------------------------------------------------
+    // 1. ONLINE CLOUD AI (Runs only when Wi-Fi / Mobile Data is actually ON)
+    // --------------------------------------------------------------------------
+    if (hasInternet) {
       try {
-        final uri = Uri.parse('https://text.pollinations.ai/openai');
-        final response = await http
+        final llm7Resp = await http
             .post(
-              uri,
+              Uri.parse('https://api.llm7.io/v1/chat/completions'),
               headers: {
                 'Content-Type': 'application/json',
-                'User-Agent': 'Mozilla/5.0 (Linux; Android 14)',
+                'Authorization': 'Bearer unused',
               },
               body: jsonEncode({
-                'model': modelName,
-                'seed': safe32BitSeed,
+                'model': 'default',
                 'messages': chatHistory,
                 'temperature': 0.6,
               }),
             )
-            .timeout(const Duration(seconds: 10));
+            .timeout(const Duration(seconds: 9));
 
-        if (response.statusCode == 200) {
-          final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+        if (llm7Resp.statusCode == 200) {
+          final decoded = jsonDecode(utf8.decode(llm7Resp.bodyBytes));
           final String? content =
               decoded['choices']?[0]?['message']?['content'];
           if (content != null && content.trim().isNotEmpty) {
             final String cleaned = _cleanMarkdownFormatting(content);
             if (cleaned.isNotEmpty) return cleaned;
           }
-        } else if (response.statusCode == 429) {
-          await Future.delayed(const Duration(milliseconds: 600));
+        }
+      } catch (_) {}
+
+      final List<String> modelsToTry = [
+        'openai',
+        'openai-fast',
+        'mistral',
+        'qwen-coder',
+      ];
+
+      for (int attempt = 0; attempt < modelsToTry.length; attempt++) {
+        final String modelName = modelsToTry[attempt];
+        final int safe32BitSeed =
+            (DateTime.now().millisecondsSinceEpoch % 900000) + attempt;
+        try {
+          final uri = Uri.parse('https://text.pollinations.ai/openai');
+          final response = await http
+              .post(
+                uri,
+                headers: {
+                  'Content-Type': 'application/json',
+                  'User-Agent': 'Mozilla/5.0 (Linux; Android 14)',
+                },
+                body: jsonEncode({
+                  'model': modelName,
+                  'seed': safe32BitSeed,
+                  'messages': chatHistory,
+                  'temperature': 0.6,
+                }),
+              )
+              .timeout(const Duration(seconds: 10));
+
+          if (response.statusCode == 200) {
+            final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+            final String? content =
+                decoded['choices']?[0]?['message']?['content'];
+            if (content != null && content.trim().isNotEmpty) {
+              final String cleaned = _cleanMarkdownFormatting(content);
+              if (cleaned.isNotEmpty) return cleaned;
+            }
+          } else if (response.statusCode == 429) {
+            await Future.delayed(const Duration(milliseconds: 600));
+          }
+        } catch (_) {}
+      }
+
+      try {
+        final int safeSeed = DateTime.now().millisecondsSinceEpoch % 900000;
+        final String directPrompt =
+            "Reply naturally in the same language as the user without markdown asterisks. User: $contextualPrompt";
+        final Uri getFallbackUri = Uri.parse(
+          'https://text.pollinations.ai/${Uri.encodeComponent(directPrompt)}?model=openai&seed=$safeSeed',
+        );
+        final getResp = await http.get(getFallbackUri, headers: {
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 14)',
+        }).timeout(const Duration(seconds: 10));
+        if (getResp.statusCode == 200 && getResp.body.trim().isNotEmpty) {
+          final String cleaned =
+              _cleanMarkdownFormatting(utf8.decode(getResp.bodyBytes));
+          if (cleaned.isNotEmpty &&
+              !cleaned.startsWith('<!DOCTYPE') &&
+              !cleaned.startsWith('{')) {
+            return cleaned;
+          }
         }
       } catch (_) {}
     }
 
-    try {
-      final int safeSeed = DateTime.now().millisecondsSinceEpoch % 900000;
-      final String directPrompt =
-          "Reply naturally in the same language as the user without markdown asterisks. User: $contextualPrompt";
-      final Uri getFallbackUri = Uri.parse(
-        'https://text.pollinations.ai/${Uri.encodeComponent(directPrompt)}?model=openai&seed=$safeSeed',
-      );
-      final getResp = await http.get(getFallbackUri, headers: {
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 14)',
-      }).timeout(const Duration(seconds: 10));
-      if (getResp.statusCode == 200 && getResp.body.trim().isNotEmpty) {
-        final String cleaned =
-            _cleanMarkdownFormatting(utf8.decode(getResp.bodyBytes));
-        if (cleaned.isNotEmpty &&
-            !cleaned.startsWith('<!DOCTYPE') &&
-            !cleaned.startsWith('{')) {
-          return cleaned;
-        }
-      }
-    } catch (_) {}
-
     // --------------------------------------------------------------------------
-    // 2. REAL LOCAL .GGUF ON-DEVICE INFERENCE (`lib_llama_cpp`)
+    // 2. REAL LOCAL .GGUF ON-DEVICE INFERENCE (`lib_llama_cpp` ^0.7.3)
+    // Runs immediately when Wi-Fi is OFF! Keeps generated tokens even on timeout.
     // --------------------------------------------------------------------------
     if (_loadedGgufModel != null && await _loadedGgufModel!.exists()) {
-      final cmdController = StreamController<LlamaCommand>();
+      final StringBuffer generatedTokens = StringBuffer();
       try {
         final StringBuffer localPrompt = StringBuffer();
-        localPrompt.writeln("<|im_start|>system\n$systemInstruction<|im_end|>");
-        for (int i = 1; i < chatHistory.length; i++) {
+        localPrompt.writeln(
+            "<|im_start|>system\nYou are a helpful AI assistant. Reply concisely in the user's language.<|im_end|>");
+        final int localStartIdx =
+            (chatHistory.length > 5) ? chatHistory.length - 5 : 1;
+        for (int i = localStartIdx; i < chatHistory.length; i++) {
           final role = chatHistory[i]['role'] ?? 'user';
           final content = chatHistory[i]['content'] ?? '';
           localPrompt.writeln("<|im_start|>$role\n$content<|im_end|>");
@@ -6611,50 +6629,43 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         localPrompt.write("<|im_start|>assistant\n");
 
         const llamaEngine = LibLlamaCpp();
-        final StringBuffer generatedTokens = StringBuffer();
-
-        cmdController.add(
+        final commandStream = Stream<LlamaCommand>.fromIterable([
           LlamaLoadModelCommand(
             modelPath: _loadedGgufModel!.path,
-            contextSize: 2048,
+            contextSize: 1024,
             gpuLayerCount: 0,
           ),
-        );
-        cmdController.add(
           LlamaGenerateCommand(
             prompt: localPrompt.toString(),
-            maxTokens: isFromLiveCall ? 140 : 380,
+            maxTokens: isFromLiveCall ? 90 : 220,
           ),
-        );
+          const LlamaDisposeCommand(),
+        ]);
 
         await for (final event in llamaEngine
-            .transform(cmdController.stream)
-            .timeout(const Duration(seconds: 45))) {
+            .transform(commandStream)
+            .timeout(const Duration(seconds: 60))) {
           if (event is LlamaTokenResponse) {
             generatedTokens.write(event.text);
             if (generatedTokens.toString().contains('<|im_end|>') ||
                 generatedTokens.toString().contains('<|endoftext|>')) {
               break;
             }
+          } else if (event is LlamaDoneResponse ||
+              event is LlamaErrorResponse) {
+            break;
           }
         }
+      } catch (_) {}
 
-        cmdController.add(const LlamaDisposeCommand());
-        await cmdController.close();
-
-        final String localReply = _cleanMarkdownFormatting(
-          generatedTokens
-              .toString()
-              .replaceAll('<|im_end|>', '')
-              .replaceAll('<|endoftext|>', ''),
-        );
-        if (localReply.isNotEmpty) {
-          return localReply;
-        }
-      } catch (_) {
-        try {
-          await cmdController.close();
-        } catch (_) {}
+      final String localReply = _cleanMarkdownFormatting(
+        generatedTokens
+            .toString()
+            .replaceAll('<|im_end|>', '')
+            .replaceAll('<|endoftext|>', ''),
+      );
+      if (localReply.isNotEmpty) {
+        return localReply;
       }
     }
 
@@ -6668,7 +6679,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     }
 
     // --------------------------------------------------------------------------
-    // 3. BUILT-IN OFFLINE INTELLIGENT ASSISTANT
+    // 3. BUILT-IN OFFLINE ASSISTANT (Fallback if no .GGUF is downloaded)
     // --------------------------------------------------------------------------
     return _generateBuiltInOfflineAssistantResponse(
       fullContextPrompt: contextualPrompt,
@@ -6676,6 +6687,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       detectedLang: detectedLang,
     );
   }
+
 
   Future<void> _sendChatMessage(
       {bool forceVoiceReply = false, bool isFromLiveCall = false}) async {

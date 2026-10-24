@@ -4601,9 +4601,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       for (int j = 0; j < chunk.length; j++) {
         final String originalLine = chunk[j].trim();
         final String currentResult = results[start + j].trim();
-        if (batchHttpOk &&
-            (currentResult.isEmpty ||
-                currentResult.toLowerCase() == originalLine.toLowerCase())) {
+        if (!batchHttpOk ||
+            currentResult.isEmpty ||
+            currentResult.toLowerCase() == originalLine.toLowerCase()) {
           final String singleTranslated = await _translateSingleLineWithRetry(
               originalLine, normalizedTarget);
           if (singleTranslated.trim().isNotEmpty &&

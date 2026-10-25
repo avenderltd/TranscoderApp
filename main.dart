@@ -3377,7 +3377,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         transcribeRequest: TranscribeRequest(
           audio: audioForWhisper,
           language: _preferredSpokenLang,
-          isTranslate: _preferredSpokenLang.toLowerCase().startsWith('en'),
+          isTranslate: false,
           isNoTimestamps: true,
           splitOnWord: false,
         ),
@@ -4559,7 +4559,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           chunk.map((s) => s.replaceAll('\n', ' ').trim()).join('\n');
 
       bool batchHttpOk = false;
-      for (int attempt = 0; attempt < 3; attempt++) {
+      for (int attempt = 0; attempt < 2; attempt++) {
         try {
           final uri =
               Uri.https('translate.googleapis.com', '/translate_a/single', {
@@ -4571,7 +4571,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           });
           final response = await http.get(uri, headers: {
             'User-Agent': 'Mozilla/5.0 (Linux; Android 14)',
-          }).timeout(const Duration(seconds: 6));
+          }).timeout(const Duration(seconds: 3));
 
           if (response.statusCode == 200) {
             anyOnlineRequestSucceeded = true;
@@ -4592,18 +4592,20 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             }
           }
         } catch (_) {}
-        await Future.delayed(Duration(milliseconds: 180 * (attempt + 1)));
+        await Future.delayed(Duration(milliseconds: 150 * (attempt + 1)));
       }
 
-      // Per-sentence verification: if a video switches languages mid-batch and
-      // any sentence came back untranslated, translate that individual sentence
-      // with its own `sl=auto` call so mixed-language videos translate 100%!
+      // If the very first batch failed completely, device is offline — skip 158 retries
+      if (!batchHttpOk && !anyOnlineRequestSucceeded) {
+        break;
+      }
+
       for (int j = 0; j < chunk.length; j++) {
         final String originalLine = chunk[j].trim();
         final String currentResult = results[start + j].trim();
-        if (!batchHttpOk ||
-            currentResult.isEmpty ||
-            currentResult.toLowerCase() == originalLine.toLowerCase()) {
+        if (batchHttpOk &&
+            (currentResult.isEmpty ||
+                currentResult.toLowerCase() == originalLine.toLowerCase())) {
           final String singleTranslated = await _translateSingleLineWithRetry(
               originalLine, normalizedTarget);
           if (singleTranslated.trim().isNotEmpty &&
@@ -4616,12 +4618,34 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       }
     }
 
+    final TranslateLanguage? targetMl = _mapToMlKitLang(normalizedTarget);
+
     if (anyOnlineRequestSucceeded) {
+      // Pre-cache offline dictionaries in the background while internet is active
+      if (targetMl != null) {
+        Future(() async {
+          try {
+            final TranslateLanguage sourceMl =
+                _detectUniversalSourceMlKitLanguage(lines, targetMl);
+            final modelManager = OnDeviceTranslatorModelManager();
+            if (!await modelManager.isModelDownloaded(sourceMl.bcpCode)) {
+              await modelManager.downloadModel(sourceMl.bcpCode,
+                  isWifiRequired: false);
+            }
+            if (!await modelManager.isModelDownloaded(targetMl.bcpCode)) {
+              await modelManager.downloadModel(targetMl.bcpCode,
+                  isWifiRequired: false);
+            }
+          } catch (_) {}
+        });
+      }
       return results;
     }
 
-    // OFFLINE FALLBACK (Only runs when device has ZERO internet connection)
-    final TranslateLanguage? targetMl = _mapToMlKitLang(normalizedTarget);
+    // =========================================================================
+    // OFFLINE ENGINE 1: ON-DEVICE ML KIT TRANSLATOR
+    // =========================================================================
+    bool offlineTranslated = false;
     if (targetMl != null) {
       try {
         final TranslateLanguage sourceMl =
@@ -4630,37 +4654,100 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         if (sourceMl != targetMl) {
           final modelManager = OnDeviceTranslatorModelManager();
           if (!await modelManager.isModelDownloaded(sourceMl.bcpCode)) {
-            setState(() {
-              _statusMessage =
-                  "Downloading Offline ${sourceMl.bcpCode.toUpperCase()} Dictionary...";
-            });
-            await modelManager.downloadModel(sourceMl.bcpCode,
-                isWifiRequired: false);
+            try {
+              await modelManager
+                  .downloadModel(sourceMl.bcpCode, isWifiRequired: false)
+                  .timeout(const Duration(seconds: 4));
+            } catch (_) {}
           }
           if (!await modelManager.isModelDownloaded(targetMl.bcpCode)) {
-            setState(() {
-              _statusMessage =
-                  "Downloading Offline ${targetMl.bcpCode.toUpperCase()} Dictionary...";
-            });
-            await modelManager.downloadModel(targetMl.bcpCode,
-                isWifiRequired: false);
+            try {
+              await modelManager
+                  .downloadModel(targetMl.bcpCode, isWifiRequired: false)
+                  .timeout(const Duration(seconds: 4));
+            } catch (_) {}
           }
 
-          final onDeviceTranslator = OnDeviceTranslator(
-            sourceLanguage: sourceMl,
-            targetLanguage: targetMl,
-          );
+          if (await modelManager.isModelDownloaded(sourceMl.bcpCode) &&
+              await modelManager.isModelDownloaded(targetMl.bcpCode)) {
+            final onDeviceTranslator = OnDeviceTranslator(
+              sourceLanguage: sourceMl,
+              targetLanguage: targetMl,
+            );
 
-          for (int i = 0; i < lines.length; i++) {
-            final String translated =
-                await onDeviceTranslator.translateText(lines[i]);
-            if (translated.trim().isNotEmpty) {
-              results[i] = translated.trim();
+            for (int i = 0; i < lines.length; i++) {
+              final String translated =
+                  await onDeviceTranslator.translateText(lines[i]);
+              if (translated.trim().isNotEmpty) {
+                results[i] = translated.trim();
+                offlineTranslated = true;
+              }
             }
+            await onDeviceTranslator.close();
           }
-          await onDeviceTranslator.close();
+        } else {
+          // Already translated into English by Whisper C++ offline neural engine
+          offlineTranslated = true;
         }
       } catch (_) {}
+    }
+
+    // =========================================================================
+    // OFFLINE ENGINE 2: LOCAL .GGUF 99-LANGUAGE C++ TRANSLATOR (LibLlamaCpp)
+    // =========================================================================
+    if (!offlineTranslated &&
+        _loadedGgufModel != null &&
+        await _loadedGgufModel!.exists()) {
+      for (int i = 0; i < lines.length; i++) {
+        final String srcLine = lines[i].trim();
+        if (srcLine.isEmpty) continue;
+        setState(() {
+          _statusMessage =
+              "Step 3/5: Offline GGUF AI translating (${i + 1}/${lines.length}) to $normalizedTarget...";
+        });
+        final StringBuffer generatedTokens = StringBuffer();
+        try {
+          final String prompt =
+              "<|im_start|>system\nYou are a professional translator. Translate the user text directly into language code '$normalizedTarget'. Output ONLY the translated text with no quotes or explanations.<|im_end|>\n<|im_start|>user\n$srcLine<|im_end|>\n<|im_start|>assistant\n";
+          const llamaEngine = LibLlamaCpp();
+          final commandStream = Stream<LlamaCommand>.fromIterable([
+            LlamaLoadModelCommand(
+              modelPath: _loadedGgufModel!.path,
+              contextSize: 1024,
+              gpuLayerCount: 0,
+            ),
+            LlamaGenerateCommand(
+              prompt: prompt,
+              maxTokens: 120,
+            ),
+            const LlamaDisposeCommand(),
+          ]);
+
+          await for (final event in llamaEngine
+              .transform(commandStream)
+              .timeout(const Duration(seconds: 25))) {
+            if (event is LlamaTokenResponse) {
+              generatedTokens.write(event.text);
+              if (generatedTokens.toString().contains('<|im_end|>') ||
+                  generatedTokens.toString().contains('<|endoftext|>')) {
+                break;
+              }
+            } else if (event is LlamaDoneResponse ||
+                event is LlamaErrorResponse) {
+              break;
+            }
+          }
+          final String cleanOut = _cleanMarkdownFormatting(
+            generatedTokens
+                .toString()
+                .replaceAll('<|im_end|>', '')
+                .replaceAll('<|endoftext|>', ''),
+          ).trim();
+          if (cleanOut.isNotEmpty) {
+            results[i] = cleanOut;
+          }
+        } catch (_) {}
+      }
     }
 
     return results;
@@ -4798,7 +4885,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         transcribeRequest: TranscribeRequest(
           audio: tempWavPath,
           language: "auto",
-          isTranslate: _preferredSpokenLang.toLowerCase().startsWith('en'),
+          isTranslate: false,
           isNoTimestamps: false,
           splitOnWord: false,
         ),
@@ -5494,7 +5581,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         transcribeRequest: TranscribeRequest(
           audio: tempWavPath,
           language: "auto",
-          isTranslate: _preferredSpokenLang.toLowerCase().startsWith('en'),
+          isTranslate: targetLangCode.toLowerCase().startsWith('en'),
           isNoTimestamps: false,
           splitOnWord: false,
         ),
@@ -5796,7 +5883,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         transcribeRequest: TranscribeRequest(
           audio: tempWavPath,
           language: "auto",
-          isTranslate: _preferredSpokenLang.toLowerCase().startsWith('en'),
+          isTranslate: targetLangCode.toLowerCase().startsWith('en'),
           isNoTimestamps: false,
           splitOnWord: false,
         ),

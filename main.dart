@@ -2322,19 +2322,26 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       if (ReturnCode.isSuccess(await masterSess.getReturnCode()) &&
           await File(outRawPath).exists()) {
         final double dur = await _getMediaDurationSeconds(outRawPath);
-        if (await File(rawIntermediatePath).exists()) {
-          await File(rawIntermediatePath).delete();
+        if (dur > 0.05 || await File(outRawPath).length() > 350) {
+          if (await File(rawIntermediatePath).exists()) {
+            await File(rawIntermediatePath).delete();
+          }
+          return true;
         }
-        if (dur > 0.12) return true;
       }
     } catch (_) {}
 
-    await File(rawIntermediatePath).copy(outRawPath);
-    if (await File(rawIntermediatePath).exists()) {
-      await File(rawIntermediatePath).delete();
-    }
-    final double dur = await _getMediaDurationSeconds(outRawPath);
-    return dur > 0.12;
+    try {
+      if (await File(rawIntermediatePath).exists()) {
+        await File(rawIntermediatePath).copy(outRawPath);
+        await File(rawIntermediatePath).delete();
+      }
+      if (await File(outRawPath).exists()) {
+        final double dur = await _getMediaDurationSeconds(outRawPath);
+        return dur > 0.05 || await File(outRawPath).length() > 350;
+      }
+    } catch (_) {}
+    return false;
   }
 
   Future<bool> _generateVerifiedSpeechFile({
@@ -2402,7 +2409,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         voiceGender: voiceGender,
         outRawPath: sampleWavPath,
         segmentIndex: 0,
-        engineOverride: engineMode,
+        engineOverride: _offlineFastSkipTts ? "airplane_offline" : engineMode,
       );
       if (ok && await File(sampleWavPath).exists()) {
         final Completer<void> done = Completer<void>();
@@ -4540,8 +4547,11 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   // Translates from ANY language (including mixed-language videos) into ANY
   // of the 99 target languages without ever skipping sentences!
   // ============================================================================
+  bool _offlineFastSkipTts = false;
+
   Future<List<String>> _translateBatchLines(
       List<String> lines, String targetLang) async {
+    _offlineFastSkipTts = false;
     if (targetLang == "same" || lines.isEmpty) return lines;
     final String normalizedTarget = targetLang == "zh-CN"
         ? "zh-CN"
@@ -4571,7 +4581,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           });
           final response = await http.get(uri, headers: {
             'User-Agent': 'Mozilla/5.0 (Linux; Android 14)',
-          }).timeout(const Duration(seconds: 3));
+          }).timeout(const Duration(seconds: 2));
 
           if (response.statusCode == 200) {
             anyOnlineRequestSucceeded = true;
@@ -4592,10 +4602,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             }
           }
         } catch (_) {}
-        await Future.delayed(Duration(milliseconds: 150 * (attempt + 1)));
+        await Future.delayed(Duration(milliseconds: 100 * (attempt + 1)));
       }
 
-      // If the very first batch failed completely, device is offline — skip 158 retries
       if (!batchHttpOk && !anyOnlineRequestSucceeded) {
         break;
       }
@@ -4621,94 +4630,94 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     final TranslateLanguage? targetMl = _mapToMlKitLang(normalizedTarget);
 
     if (anyOnlineRequestSucceeded) {
-      // Pre-cache offline dictionaries in the background while internet is active
-      if (targetMl != null) {
-        Future(() async {
-          try {
-            final TranslateLanguage sourceMl =
-                _detectUniversalSourceMlKitLanguage(lines, targetMl);
-            final modelManager = OnDeviceTranslatorModelManager();
-            if (!await modelManager.isModelDownloaded(sourceMl.bcpCode)) {
-              await modelManager.downloadModel(sourceMl.bcpCode,
-                  isWifiRequired: false);
+      _offlineFastSkipTts = false;
+      Future(() async {
+        try {
+          final modelManager = OnDeviceTranslatorModelManager();
+          final List<String> warmLangs = [
+            TranslateLanguage.english.bcpCode,
+            TranslateLanguage.german.bcpCode,
+            TranslateLanguage.arabic.bcpCode,
+            TranslateLanguage.french.bcpCode,
+            TranslateLanguage.spanish.bcpCode,
+            if (targetMl != null) targetMl.bcpCode,
+          ];
+          for (final code in warmLangs.toSet()) {
+            if (!await modelManager.isModelDownloaded(code)) {
+              await modelManager.downloadModel(code, isWifiRequired: false);
             }
-            if (!await modelManager.isModelDownloaded(targetMl.bcpCode)) {
-              await modelManager.downloadModel(targetMl.bcpCode,
-                  isWifiRequired: false);
-            }
-          } catch (_) {}
-        });
-      }
+          }
+        } catch (_) {}
+      });
       return results;
     }
 
-    // =========================================================================
-    // OFFLINE ENGINE 1: ON-DEVICE ML KIT TRANSLATOR
-    // =========================================================================
+    // Device is offline: tell Step 4 TTS to skip all online HTTP timeouts immediately!
+    _offlineFastSkipTts = true;
+
+    // If target is English, Whisper's C++ engine (isTranslate: true) ALREADY
+    // translated any of the 99 languages into English in Step 2 — return in 0ms!
+    if (normalizedTarget == "en") {
+      return results;
+    }
+
+    // OFFLINE ENGINE 1: Fast On-Device ML Kit (~1-2 seconds for all 158 lines)
     bool offlineTranslated = false;
     if (targetMl != null) {
       try {
         final TranslateLanguage sourceMl =
             _detectUniversalSourceMlKitLanguage(lines, targetMl);
+        final modelManager = OnDeviceTranslatorModelManager();
 
-        if (sourceMl != targetMl) {
-          final modelManager = OnDeviceTranslatorModelManager();
-          if (!await modelManager.isModelDownloaded(sourceMl.bcpCode)) {
-            try {
-              await modelManager
-                  .downloadModel(sourceMl.bcpCode, isWifiRequired: false)
-                  .timeout(const Duration(seconds: 4));
-            } catch (_) {}
-          }
-          if (!await modelManager.isModelDownloaded(targetMl.bcpCode)) {
-            try {
-              await modelManager
-                  .downloadModel(targetMl.bcpCode, isWifiRequired: false)
-                  .timeout(const Duration(seconds: 4));
-            } catch (_) {}
-          }
+        TranslateLanguage effectiveSource = sourceMl;
+        if (!await modelManager.isModelDownloaded(effectiveSource.bcpCode) &&
+            await modelManager.isModelDownloaded(
+                TranslateLanguage.english.bcpCode)) {
+          effectiveSource = TranslateLanguage.english;
+        }
 
-          if (await modelManager.isModelDownloaded(sourceMl.bcpCode) &&
-              await modelManager.isModelDownloaded(targetMl.bcpCode)) {
-            final onDeviceTranslator = OnDeviceTranslator(
-              sourceLanguage: sourceMl,
-              targetLanguage: targetMl,
-            );
-
-            for (int i = 0; i < lines.length; i++) {
-              final String translated =
-                  await onDeviceTranslator.translateText(lines[i]);
-              if (translated.trim().isNotEmpty) {
-                results[i] = translated.trim();
-                offlineTranslated = true;
-              }
+        if (effectiveSource != targetMl &&
+            await modelManager.isModelDownloaded(effectiveSource.bcpCode) &&
+            await modelManager.isModelDownloaded(targetMl.bcpCode)) {
+          final onDeviceTranslator = OnDeviceTranslator(
+            sourceLanguage: effectiveSource,
+            targetLanguage: targetMl,
+          );
+          for (int i = 0; i < lines.length; i++) {
+            final String translated =
+                await onDeviceTranslator.translateText(lines[i]);
+            if (translated.trim().isNotEmpty) {
+              results[i] = translated.trim();
+              offlineTranslated = true;
             }
-            await onDeviceTranslator.close();
           }
-        } else {
-          // Already translated into English by Whisper C++ offline neural engine
-          offlineTranslated = true;
+          await onDeviceTranslator.close();
         }
       } catch (_) {}
     }
 
-    // =========================================================================
-    // OFFLINE ENGINE 2: LOCAL .GGUF 99-LANGUAGE C++ TRANSLATOR (LibLlamaCpp)
-    // =========================================================================
+    // OFFLINE ENGINE 2: Multi-line batched GGUF fallback (loads once per 12 lines instead of 158x)
     if (!offlineTranslated &&
         _loadedGgufModel != null &&
         await _loadedGgufModel!.exists()) {
-      for (int i = 0; i < lines.length; i++) {
-        final String srcLine = lines[i].trim();
-        if (srcLine.isEmpty) continue;
+      const int ggufBatch = 12;
+      for (int start = 0; start < lines.length; start += ggufBatch) {
+        final int end = (start + ggufBatch < lines.length)
+            ? start + ggufBatch
+            : lines.length;
+        final List<String> sub = lines.sublist(start, end);
+        final String numberedInput = List.generate(
+            sub.length, (idx) => "${idx + 1}. ${sub[idx].trim()}").join("\n");
+
         setState(() {
           _statusMessage =
-              "Step 3/5: Offline GGUF AI translating (${i + 1}/${lines.length}) to $normalizedTarget...";
+              "Step 3/5: Offline GGUF batch-translating ($end/${lines.length}) to $normalizedTarget...";
         });
+
         final StringBuffer generatedTokens = StringBuffer();
         try {
           final String prompt =
-              "<|im_start|>system\nYou are a professional translator. Translate the user text directly into language code '$normalizedTarget'. Output ONLY the translated text with no quotes or explanations.<|im_end|>\n<|im_start|>user\n$srcLine<|im_end|>\n<|im_start|>assistant\n";
+              "<|im_start|>system\nTranslate each numbered line into language '$normalizedTarget'. Keep the exact same numbering, one line per number.<|im_end|>\n<|im_start|>user\n$numberedInput<|im_end|>\n<|im_start|>assistant\n";
           const llamaEngine = LibLlamaCpp();
           final commandStream = Stream<LlamaCommand>.fromIterable([
             LlamaLoadModelCommand(
@@ -4718,7 +4727,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             ),
             LlamaGenerateCommand(
               prompt: prompt,
-              maxTokens: 120,
+              maxTokens: 260,
             ),
             const LlamaDisposeCommand(),
           ]);
@@ -4737,14 +4746,16 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               break;
             }
           }
-          final String cleanOut = _cleanMarkdownFormatting(
-            generatedTokens
-                .toString()
-                .replaceAll('<|im_end|>', '')
-                .replaceAll('<|endoftext|>', ''),
-          ).trim();
-          if (cleanOut.isNotEmpty) {
-            results[i] = cleanOut;
+          final List<String> outLines = generatedTokens
+              .toString()
+              .replaceAll('<|im_end|>', '')
+              .replaceAll('<|endoftext|>', '')
+              .split('\n')
+              .map((s) => s.replaceFirst(RegExp(r'^\d+[\.\)\-]\s*'), '').trim())
+              .where((s) => s.isNotEmpty)
+              .toList();
+          for (int k = 0; k < sub.length && k < outLines.length; k++) {
+            results[start + k] = outLines[k];
           }
         } catch (_) {}
       }

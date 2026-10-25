@@ -279,13 +279,13 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   int _estimatedRamGB = 8;
   int _optimalThreads = 4;
   String _optimalPreset = "superfast";
-  String _recommendedModel = "Models #1–#5 (Up to 7B)";
+  String _recommendedModel = "Models #1–#19 (Up to 7B)";
 
   final TextEditingController _chatController = TextEditingController();
   final TextEditingController _elevenLabsKeyController = TextEditingController();
   final TextEditingController _fishAudioKeyController = TextEditingController();
   final TextEditingController _customSpaceUrlController =
-      TextEditingController(text: "https://coqui-xtts.hf.space");
+      TextEditingController(text: "");
 
   bool _webSearchEnabled = true;
   bool _autoVoiceReplyEnabled = true;
@@ -329,35 +329,18 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   File? _attachedVisionFile;
 
   List<String> _permanentMemoryFacts = [];
-  List<ChatMessage> _messages = [
-    ChatMessage(
-      sender: "ai",
-      text:
-          "أهلاً بك! Hello! Hallo! 👋\n\n• اضغط زر الصوت (🇸🇦 عربي / 🇺🇸 EN / 🇩🇪 DE) لتحديد لغة التحدث بدقة 100%.\n• اضغط 🎭 'Steerable / Voice Clone' لاختيار نبرة الصوت (Coral, Nova, Sage, Ash, Onyx, Ballad) أو الأنظمة الخمسة أو استنساخ أي صوت من 3–6 ثوانٍ!\n• اضغط 📞 LIVE CALL للمحادثة الصوتية المباشرة الحية!",
-    )
-  ];
+  List<ChatMessage> _messages = [];
 
   final List<VoiceEngineSpec> _voiceEngineCatalog = [
-    VoiceEngineSpec(
-      id: "tri_fusion_all",
-      title: "👑 Master Fusion (XTTS-v2 + Kokoro-82M + VoxCPM2/Qwen + DSP)",
-      subtitle:
-          "Chains Zero-Shot 3–6s Cloning -> Expressive Steerable Prosody -> Real F0 Formant Mastering",
-      badge: "🔥 All Engines Combined (Zero Smoke & Mirrors)",
-      description:
-          "1) Analyzes the exact fundamental frequency (Hz) & RMS dynamics of your 3–6s reference clip via FFmpeg astats. 2) Routes through XTTS-v2 / VoxCPM2 / Kokoro-82M / Steerable Audio. 3) Applies measured harmonic formant matching.",
-      supportsZeroShotCloning: true,
-      worksOffline: true,
-    ),
     VoiceEngineSpec(
       id: "steerable_emotion",
       title: "1. 🌟 Expressive Human (Coral / Ash / Sage + Emotion Steering)",
       subtitle:
-          "Distinct vocal tract profiles for Coral, Nova, Sage, Ash, Onyx & Ballad + Emotion",
-      badge: "✅ 100% Free • Zero API Key Required",
+          "Studio neural voices (Coral, Nova, Sage, Ash, Onyx & Ballad) + Emotion",
+      badge: "✅ 100% Free • Studio AI Voices",
       description:
-          "Uses steerable neural voices (Coral, Nova, Sage, Ash, Onyx, Ballad) injected with real-time acting instructions and distinct acoustic formant sculpting.",
-      supportsZeroShotCloning: true,
+          "Uses steerable studio neural voices (Coral, Nova, Sage, Ash, Onyx, Ballad) injected with real-time acting instructions.",
+      supportsZeroShotCloning: false,
       worksOffline: true,
     ),
     VoiceEngineSpec(
@@ -367,41 +350,30 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           "Pure Broadcast Regional Neural Stream (Crisp Studio Broadcast)",
       badge: "🌍 100% Native Arabic, German, French & 99 Langs",
       description:
-          "Locks onto native regional pronunciation packs (ar-XA, de-DE, fr-FR) with crisp studio broadcast EQ and natural breathing cadence.",
+          "Locks onto native regional pronunciation packs (ar-XA, de-DE, fr-FR) with crisp studio broadcast EQ and natural cadence.",
       supportsZeroShotCloning: false,
       worksOffline: false,
     ),
     VoiceEngineSpec(
       id: "xtts_voxcpm_clone",
-      title: "3. 🎭 Studio Actor + Zero-Shot Cloning (XTTS-v2 + VoxCPM2 + ElevenLabs)",
+      title: "3. 🎭 ElevenLabs & Fish Audio Cloud Voice Cloning",
       subtitle:
-          "Deep Cinema Actor Timbre + Real Gradio v4/v5 Multipart /upload & ElevenLabs",
-      badge: "🎯 True 3–6s Reference Speaker Cloning",
+          "Real Neural Voice Cloning via ElevenLabs (xi-api-key) or Fish Audio API",
+      badge: "🔑 Requires ElevenLabs or Fish Audio API Key",
       description:
-          "Uploads your 3–6s reference WAV via multipart HTTP to Coqui XTTS-v2 / VoxCPM2 Spaces (or uses deep cinema actor formant matching when no clip is selected).",
+          "Clones your voice using your official ElevenLabs or Fish Audio API key.",
       supportsZeroShotCloning: true,
-      worksOffline: true,
-    ),
-    VoiceEngineSpec(
-      id: "kokoro_82m",
-      title: "4. ⚡ KokoClone / Kokoro-82M ONNX & Spectral Formant Cloner",
-      subtitle:
-          "Kokoro-82M ONNX voice weights + High-Clarity Expressive Neural Timbre",
-      badge: "📱 Lightweight & Local-First",
-      description:
-          "Reads your downloaded Kokoro-82M IEEE-754 voice tensor from storage and applies Kokoro's signature expressive harmonic formant curve.",
-      supportsZeroShotCloning: true,
-      worksOffline: true,
+      worksOffline: false,
     ),
     VoiceEngineSpec(
       id: "airplane_offline",
-      title: "5. ✈️ Airplane Mode 100% Offline Neural + Acoustic Formant Cloner",
+      title: "4. ✈️ Airplane Mode 100% Offline Device Voice",
       subtitle:
-          "100% Air-Gapped On-Device Synthesis + Warm Studio Formant Mastering",
+          "100% Air-Gapped On-Device System Neural TTS Synthesis",
       badge: "🛡️ Zero Internet Required",
       description:
-          "Runs 100% offline using your device's local neural voice and reshapes vocal tract frequencies with warm studio presence.",
-      supportsZeroShotCloning: true,
+          "Runs 100% offline using your device's built-in system voice with zero network calls.",
+      supportsZeroShotCloning: false,
       worksOffline: true,
     ),
   ];
@@ -664,8 +636,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       howItHelpsYou: "Strong comprehension, translation, and creative writing in under 3.7GB.",
       downloadUrl: "https://huggingface.co/bartowski/Yi-1.5-6B-Chat-GGUF/resolve/main/Yi-1.5-6B-Chat-Q4_K_M.gguf",
       fileName: "Yi-1.5-6B-Chat-Q4_K_M.gguf",
-      minCoresRecommended: 8,
-      minRamGBRecommended: 10,
+      minCoresRecommended: 7,
+      minRamGBRecommended: 8,
     ),
     // --- 7B TIER ---
     AiModelOption(
@@ -680,8 +652,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       howItHelpsYou: "Gives you software engineering and scientific reasoning.",
       downloadUrl: "https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF/resolve/main/DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
       fileName: "DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
-      minCoresRecommended: 8,
-      minRamGBRecommended: 12,
+      minCoresRecommended: 7,
+      minRamGBRecommended: 8,
     ),
     AiModelOption(
       id: "qwen_25_7b",
@@ -695,8 +667,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       howItHelpsYou: "Translates complex idioms and writes full production modules quickly.",
       downloadUrl: "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_k_m.gguf",
       fileName: "qwen2.5-7b-instruct-q4_k_m.gguf",
-      minCoresRecommended: 8,
-      minRamGBRecommended: 12,
+      minCoresRecommended: 7,
+      minRamGBRecommended: 8,
     ),
     AiModelOption(
       id: "mistral_7b_v03",
@@ -710,8 +682,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       howItHelpsYou: "Fast, direct answers in English, German, French, and Spanish.",
       downloadUrl: "https://huggingface.co/bartowski/Mistral-7B-Instruct-v0.3-GGUF/resolve/main/Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
       fileName: "Mistral-7B-Instruct-v0.3-Q4_K_M.gguf",
-      minCoresRecommended: 8,
-      minRamGBRecommended: 12,
+      minCoresRecommended: 7,
+      minRamGBRecommended: 8,
     ),
     // --- 8B TIER ---
     AiModelOption(
@@ -1173,7 +1145,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       PresetItem(
         title: "AI Auto-Dub Video (Voiceover)",
         subtitle:
-            "All 5 Voice & Cloning Engines (XTTS-v2 + Kokoro-82M + VoxCPM2) • 15%/0% BG",
+            "Studio AI Voices + ElevenLabs & Fish Audio Cloning • 15%/0% BG",
         icon: Icons.record_voice_over_outlined,
         extension: "mp4",
         buildCommand: (i, o) => '',
@@ -2324,7 +2296,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     }
 
     switch (activeEngine) {
-      case 'tri_fusion_all':
+      case 'steerable_emotion':
         pitch *= 0.96;
         chestDb += 2.2;
         presenceDb += 2.0;
@@ -2443,7 +2415,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     final String rawIntermediatePath =
         '${tempDir.path}/engine_raw_${uniqueTs}_$segmentIndex.mp3';
 
-    if ((activeEngine == "tri_fusion_all" ||
+    if ((activeEngine == "steerable_emotion" ||
             activeEngine == "xtts_voxcpm_clone") &&
         (_elevenLabsKeyController.text.trim().isNotEmpty ||
             _fishAudioKeyController.text.trim().isNotEmpty)) {
@@ -2456,7 +2428,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     }
 
     if (!generatedBaseAudio &&
-        (activeEngine == "tri_fusion_all" ||
+        (activeEngine == "steerable_emotion" ||
             activeEngine == "xtts_voxcpm_clone" ||
             activeEngine == "kokoro_82m") &&
         activeEngine != "airplane_offline") {
@@ -2467,7 +2439,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             ]
           : [
               _customSpaceUrlController.text.trim(),
-              "https://coqui-xtts.hf.space",
+              "",
               "https://qwen-qwen-tts.hf.space",
             ];
 
@@ -2649,7 +2621,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       double chestDb = personaAndEngineProfile['chestDb']!;
       double presenceDb = personaAndEngineProfile['presenceDb']!;
 
-      if (hasValidReferenceClip && acoustics != null) {
+      if (false && hasValidReferenceClip && acoustics != null) {
         pitchRatio = acoustics.computedPitchRatio;
         chestDb = acoustics.lowChestEqDb;
         presenceDb = acoustics.presenceEqDb;
@@ -2923,7 +2895,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   }
 
   String _getActiveVoiceEngineShortBadge() {
-    if (_selectedVoiceEngineId == "tri_fusion_all") return "👑 Master-5";
+    if (_selectedVoiceEngineId == "steerable_emotion") return "👑 Master-5";
     if (_selectedVoiceEngineId == "steerable_emotion") return "🌟 Steerable";
     if (_selectedVoiceEngineId == "native_dialect") return "🎙️ Native Pro";
     if (_selectedVoiceEngineId == "xtts_voxcpm_clone") return "🎭 XTTS/Clone";
@@ -2955,7 +2927,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          "All 5 Voice & Clone Engines Studio",
+                          "Voice & Cloning Studio (ElevenLabs / Fish)",
                           style: TextStyle(
                             color: Colors.tealAccent,
                             fontWeight: FontWeight.bold,
@@ -2967,7 +2939,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                   ),
                   const SizedBox(height: 3),
                   const Text(
-                    "1. Steerable Coral/Ash • 2. Native Dialect • 3. XTTS-v2/VoxCPM2/ElevenLabs • 4. Kokoro-82M • 5. Airplane Offline",
+                    "1. Steerable Coral/Ash • 2. Native Dialect • 3. ElevenLabs & Fish Clone • 4. Airplane Offline",
                     style: TextStyle(color: Colors.white70, fontSize: 10.5),
                   ),
                 ],
@@ -2991,7 +2963,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text(
-                              "🎙️ Zero-Shot 3–6s Reference Speaker Cloner & Acoustic Profiler",
+                              "🔑 ElevenLabs & Fish Audio Voice Cloner",
                               style: TextStyle(
                                 color: Colors.tealAccent,
                                 fontWeight: FontWeight.bold,
@@ -3437,7 +3409,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                       ExpansionTile(
                         tilePadding: EdgeInsets.zero,
                         title: const Text(
-                          "🔑 Optional: Free-Tier ElevenLabs / Fish Key or Custom XTTS Space URL",
+                          "🔑 ElevenLabs / Fish Audio API Keys (Required for Voice Cloning)",
                           style: TextStyle(
                               color: Colors.white70,
                               fontSize: 11.5,
@@ -3450,7 +3422,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                                 color: Colors.white, fontSize: 12),
                             decoration: const InputDecoration(
                               labelText:
-                                  "XTTS-v2 / VoxCPM2 Gradio Space URL (Free)",
+                                  "Legacy Free Gradio URL (Disabled — Use ElevenLabs or Fish Key Below)",
                               labelStyle: TextStyle(
                                   color: Colors.tealAccent, fontSize: 11),
                               isDense: true,
@@ -3904,7 +3876,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               ? "Pro Mobile (${androidInfo.model} • $cores Cores)"
               : "Balanced Mobile (${androidInfo.model} • $cores Cores)";
           _recommendedModel = isHighEnd
-              ? "Models #1–#5 (Up to 7B)"
+              ? "Models #1–#19 (Up to 7B)"
               : "Models #1–#3 (Up to 3B)";
           _statusMessage = "Ready • Hardware Profile Active";
         });
@@ -3914,7 +3886,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           _optimalThreads = (cores > 4) ? cores - 2 : 4;
           _optimalPreset = "fast";
           _hardwareTierBadge = "Laptop / PC Studio ($cores Cores)";
-          _recommendedModel = "Models #1–#8 (Up to 32B+)";
+          _recommendedModel = "Models #1–#32 (Up to 32B+)";
           _statusMessage = "Ready • Desktop Multi-Core Profile Active";
         });
       }
@@ -4240,7 +4212,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         Expanded(
                           child: ChoiceChip(
                             label:
-                                const Text("🌍 All 12 Tiers (Up to 671B)"),
+                                const Text("🌍 All 37 AI Brains (Up to 671B)"),
                             selected: showAllIncludingSupercomputer,
                             selectedColor:
                                 Colors.tealAccent.withOpacity(0.22),
@@ -5427,7 +5399,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               insetPadding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
               title: const Text(
-                "All 5 Voice & Clone Dubbing Studio",
+                "AI Voice & Dubbing Studio (ElevenLabs / Fish)",
                 style: TextStyle(
                     color: Colors.tealAccent,
                     fontSize: 17,
@@ -5452,7 +5424,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 0),
                         title: const Text(
-                          "🎭 Auto-Clone Video Speaker (3–6s Reference + F0 Hz)",
+                          "🎭 Clone Speaker via ElevenLabs / Fish Audio Key",
                           style: TextStyle(
                               color: Colors.tealAccent,
                               fontWeight: FontWeight.bold,
@@ -5502,32 +5474,24 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                       child: Row(
                         children: [
                           for (final eng in [
-                            {
-                              'id': 'tri_fusion_all',
-                              'label': '👑 Master Fusion (All 5)'
-                            },
-                            {
-                              'id': 'steerable_emotion',
-                              'label': '1. 🌟 Steerable Coral/Ash'
-                            },
-                            {
-                              'id': 'native_dialect',
-                              'label': '2. 🎙️ Native Dialect Pro'
-                            },
-                            {
-                              'id': 'xtts_voxcpm_clone',
-                              'label': '3. 🎭 XTTS-v2 / VoxCPM2'
-                            },
-                            {
-                              'id': 'kokoro_82m',
-                              'label': '4. ⚡ Kokoro-82M'
-                            },
-                            {
-                              'id': 'airplane_offline',
-                              'label': '5. ✈️ Airplane Offline'
-                            },
-                          ])
-                            Padding(
+                              {
+                                'id': 'steerable_emotion',
+                                'label': '1. 🌟 Steerable Coral/Ash'
+                              },
+                              {
+                                'id': 'native_dialect',
+                                'label': '2. 🎙️ Native Dialect Pro'
+                              },
+                              {
+                                'id': 'xtts_voxcpm_clone',
+                                'label': '3. 🎭 ElevenLabs / Fish Clone'
+                              },
+                              {
+                                'id': 'airplane_offline',
+                                'label': '4. ✈️ Airplane Offline'
+                              },
+                            ])
+                              Padding(
                               padding: const EdgeInsets.only(right: 6),
                               child: ChoiceChip(
                                 label: Text(eng['label']!),
@@ -7516,7 +7480,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                                       color: Colors.tealAccent, size: 14),
                                   SizedBox(width: 4),
                                   Text(
-                                    "All 12 AI Brains",
+                                    "All 37 AI Brains",
                                     style: TextStyle(
                                       color: Colors.tealAccent,
                                       fontSize: 11,

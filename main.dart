@@ -1,3 +1,5 @@
+import 'package:flutter/services.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 // ============================================================================
 // FILE: main.dart — PART 1 OF 3 (COMPLETE • LINE-BY-LINE VERIFIED)
 // Includes:
@@ -7419,20 +7421,81 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   static const String _startIoAppId = "209515884";
   static const String _adMobTestBannerId = "ca-app-pub-3940256099942544/6300978111";
   static const String _adMobTestRewardedId = "ca-app-pub-3940256099942544/5224354917";
+  static const MethodChannel _startIoChannel = MethodChannel('pro_media_studio/startio');
+  BannerAd? _adMobBanner;
+  bool _isAdMobBannerLoaded = false;
+  RewardedAd? _adMobRewardedAd;
+  bool _isAdMobRewardedLoaded = false;
+  bool _adsSdkInitialized = false;
+  bool _startIoTestAdsEnabled = true;
   bool _accountStateLoaded = false;
 
   File get _accountStateFile => File('${Directory.systemTemp.path}/pms_account_state.json');
 
   void _ensureAccountInitialized() {
-    if (_accountStateLoaded) return;
-    _accountStateLoaded = true;
+    if (!_accountStateLoaded) {
+      _accountStateLoaded = true;
+      try {
+        if (_accountStateFile.existsSync()) {
+          final data = jsonDecode(_accountStateFile.readAsStringSync());
+          _signedInUserEmail = data['email'];
+          _userSubscriptionTier = data['tier'] ?? 'free';
+          _dubbingMinutesRemaining = data['mins'] ?? 0;
+        }
+      } catch (_) {}
+    }
+    if (!_adsSdkInitialized && Platform.isAndroid) {
+      _adsSdkInitialized = true;
+      try {
+        MobileAds.instance.initialize().then((_) {
+          _loadAdMobBanner();
+          _loadAdMobRewardedAd();
+        });
+      } catch (_) {}
+      try {
+        _startIoChannel.invokeMethod('initStartIo', {'testMode': _startIoTestAdsEnabled});
+      } catch (_) {}
+    }
+  }
+
+  void _loadAdMobBanner() {
+    if (!Platform.isAndroid || _userSubscriptionTier != "free") return;
     try {
-      if (_accountStateFile.existsSync()) {
-        final data = jsonDecode(_accountStateFile.readAsStringSync());
-        _signedInUserEmail = data['email'];
-        _userSubscriptionTier = data['tier'] ?? 'free';
-        _dubbingMinutesRemaining = data['mins'] ?? 0;
-      }
+      _adMobBanner?.dispose();
+      _adMobBanner = BannerAd(
+        adUnitId: _adMobTestBannerId,
+        size: AdSize.banner,
+        request: const AdRequest(),
+        listener: BannerAdListener(
+          onAdLoaded: (_) {
+            if (mounted) setState(() => _isAdMobBannerLoaded = true);
+          },
+          onAdFailedToLoad: (ad, _) {
+            ad.dispose();
+            if (mounted) setState(() => _isAdMobBannerLoaded = false);
+          },
+        ),
+      )..load();
+    } catch (_) {}
+  }
+
+  void _loadAdMobRewardedAd() {
+    if (!Platform.isAndroid) return;
+    try {
+      RewardedAd.load(
+        adUnitId: _adMobTestRewardedId,
+        request: const AdRequest(),
+        rewardedAdLoadCallback: RewardedAdLoadCallback(
+          onAdLoaded: (ad) {
+            _adMobRewardedAd = ad;
+            _isAdMobRewardedLoaded = true;
+          },
+          onAdFailedToLoad: (_) {
+            _adMobRewardedAd = null;
+            _isAdMobRewardedLoaded = false;
+          },
+        ),
+      );
     } catch (_) {}
   }
 
@@ -7526,6 +7589,46 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
   Future<bool> _playRewardedAdDialog({required String rewardDescription}) async {
     _ensureAccountInitialized();
+
+    // 1. Try Real Google AdMob Rewarded Video (when mode is 'admob' or 'both')
+    if (Platform.isAndroid && _activeAdProvider != "startio" && _isAdMobRewardedLoaded && _adMobRewardedAd != null) {
+      final Completer<bool> completer = Completer<bool>();
+      bool rewardEarned = false;
+      _adMobRewardedAd!.fullScreenContentCallback = FullScreenContentCallback(
+        onAdDismissedFullScreenContent: (ad) {
+          ad.dispose();
+          _adMobRewardedAd = null;
+          _isAdMobRewardedLoaded = false;
+          _loadAdMobRewardedAd();
+          if (!completer.isCompleted) completer.complete(rewardEarned);
+        },
+        onAdFailedToShowFullScreenContent: (ad, _) {
+          ad.dispose();
+          _adMobRewardedAd = null;
+          _isAdMobRewardedLoaded = false;
+          _loadAdMobRewardedAd();
+          if (!completer.isCompleted) completer.complete(false);
+        },
+      );
+      await _adMobRewardedAd!.show(
+        onUserEarnedReward: (_, __) {
+          rewardEarned = true;
+        },
+      );
+      final bool adMobSuccess = await completer.future;
+      if (adMobSuccess) return true;
+    }
+
+    // 2. Try Real Start.io Native SDK Rewarded Video (App ID: 209515884) when mode is 'startio' or 'both'
+    if (Platform.isAndroid && _activeAdProvider != "admob") {
+      try {
+        final bool? startIoEarned = await _startIoChannel.invokeMethod<bool>(
+          'showRewardedAd',
+          {'testMode': _startIoTestAdsEnabled},
+        );
+        if (startIoEarned == true) return true;
+      } catch (_) {}
+    }
     int secondsLeft = 5;
     bool completed = false;
     bool claimed = false;
@@ -8121,7 +8224,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     if (_userSubscriptionTier != "free") return const SizedBox.shrink();
     return Container(
       width: double.infinity,
-      height: 52,
+      height: 54,
       decoration: const BoxDecoration(
         color: Color(0xFF121212),
         border: Border(top: BorderSide(color: Colors.white12, width: 0.8)),
@@ -8129,19 +8232,26 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
-          const Icon(Icons.campaign_rounded, color: Colors.amberAccent, size: 16),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              _activeAdProvider == "admob"
-                  ? "AdMob Test Banner (320x50)"
-                  : (_activeAdProvider == "startio"
-                      ? "Start.io Ad (#$_startIoAppId)"
-                      : "AdMob / Start.io (#$_startIoAppId)"),
-              style: const TextStyle(color: Colors.white70, fontSize: 10.5),
-              overflow: TextOverflow.ellipsis,
+          if (_activeAdProvider != "startio" && _isAdMobBannerLoaded && _adMobBanner != null)
+            Expanded(
+              child: SizedBox(
+                height: 50,
+                child: AdWidget(ad: _adMobBanner!),
+              ),
+            )
+          else ...[
+            const Icon(Icons.campaign_rounded, color: Colors.amberAccent, size: 16),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                _activeAdProvider == "admob"
+                    ? "Loading AdMob Banner..."
+                    : "Start.io Active (#$_startIoAppId)",
+                style: const TextStyle(color: Colors.white70, fontSize: 10.5),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-          ),
+          ],
           TextButton(
             style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6)),
             onPressed: () => _showRewardedAdForMinutes(minutesToAdd: 2),

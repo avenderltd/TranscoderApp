@@ -41,6 +41,18 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+    
+        <!-- Google AdMob Official Test App ID -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-3940256099942544~3347511713"/>
+        <!-- Start.io App ID (209515884) -->
+        <meta-data
+            android:name="com.startapp.sdk.APPLICATION_ID"
+            android:value="209515884"/>
+        <meta-data
+            android:name="com.startapp.sdk.RETURN_ADS_ENABLED"
+            android:value="false"/>
     </application>
   <queries>
     <intent>

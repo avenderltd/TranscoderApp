@@ -9,7 +9,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  google_mobile_ads: 5.1.0
   ffmpeg_kit_flutter_new: ^4.6.7
   whisper_flutter_new: ^1.0.1
   receive_sharing_intent: ^1.8.0

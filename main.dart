@@ -1,3 +1,4 @@
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 // ============================================================================
 // FILE: main.dart — PART 1 OF 3 (COMPLETE • LINE-BY-LINE VERIFIED)
 // Includes:
@@ -35,6 +36,884 @@ class TranscoderApp extends StatelessWidget {
   const TranscoderApp({super.key});
 
   @override
+    // 3-Tier Subscription & AdMob/Start.io Test State
+  String _userSubscriptionTier = "free"; // "free", "creator_8", "pro_20"
+  int _dubbingMinutesRemaining = 0;
+  int? _freeChatMessagesUsed = 0; // Free = 0m (watch ads), €8 = 60m, €20 = 250m
+  String? _signedInUserEmail;
+  String _activeAdProvider = "both"; // "both", "admob", "startio"
+  static const String _startIoAppId = "209515884";
+  static const String _adMobTestBannerId = "ca-app-pub-3940256099942544/6300978111";
+  static const String _adMobTestRewardedId = "ca-app-pub-3940256099942544/5224354917";
+
+  BannerAd? _adMobBanner;
+  bool _isAdMobBannerLoaded = false;
+  RewardedAd? _testRewardedAd;
+  bool _isRewardedAdLoaded = false;
+  bool _adsInitialized = false;
+  bool _accountStateLoaded = false;
+
+  File get _accountStateFile => File('${Directory.systemTemp.path}/pms_account_state.json');
+
+  void _ensureAccountAndAdsInitialized() {
+    if (!_accountStateLoaded) {
+      _accountStateLoaded = true;
+      try {
+        if (_accountStateFile.existsSync()) {
+          final data = jsonDecode(_accountStateFile.readAsStringSync());
+          _signedInUserEmail = data['email'];
+          _userSubscriptionTier = data['tier'] ?? 'free';
+          _dubbingMinutesRemaining = data['mins'] ?? 0;
+        }
+      } catch (_) {}
+    }
+    if (!_adsInitialized) {
+      _adsInitialized = true;
+      try {
+        MobileAds.instance.initialize().then((_) {
+          _loadAdMobBanner();
+          _loadTestRewardedAd();
+        });
+      } catch (_) {}
+    }
+  }
+
+  void _saveAccountState() {
+    try {
+      _accountStateFile.writeAsStringSync(jsonEncode({
+        'email': _signedInUserEmail,
+        'tier': _userSubscriptionTier,
+        'mins': _dubbingMinutesRemaining,
+      }));
+    } catch (_) {}
+  }
+
+  void _loadAdMobBanner() {
+    if (_userSubscriptionTier != "free") return;
+    try {
+      _adMobBanner?.dispose();
+      _adMobBanner = BannerAd(
+        adUnitId: _adMobTestBannerId,
+        size: AdSize.banner,
+        request: const AdRequest(),
+        listener: BannerAdListener(
+          onAdLoaded: (_) {
+            if (mounted) setState(() => _isAdMobBannerLoaded = true);
+          },
+          onAdFailedToLoad: (ad, _) {
+            ad.dispose();
+            if (mounted) setState(() => _isAdMobBannerLoaded = false);
+          },
+        ),
+      )..load();
+    } catch (_) {}
+  }
+
+  void _loadTestRewardedAd() {
+    try {
+      RewardedAd.load(
+        adUnitId: _adMobTestRewardedId,
+        request: const AdRequest(),
+        rewardedAdLoadCallback: RewardedAdLoadCallback(
+          onAdLoaded: (ad) {
+            _testRewardedAd = ad;
+            _isRewardedAdLoaded = true;
+          },
+          onAdFailedToLoad: (_) => _isRewardedAdLoaded = false,
+        ),
+      );
+    } catch (_) {}
+  }
+
+  // Classify every preset from the 5 Media Tabs into "free", "quota", "creator_or_ad", or "pro_20_only"
+  String _getPresetAccessCategory(String title) {
+    final t = title.toLowerCase();
+    // €20 Pro Studio Exclusive features
+    if (t.contains("4k ultra hd") || t.contains("auto-dub + burn subtitles")) {
+      return "pro_20_only";
+    }
+    // Minute-Quota Gated AI Subtitle & Dubbing features
+    if (t.contains("auto-dub") ||
+        t.contains("auto-subtitles") ||
+        t.contains("auto-transcribe") ||
+        t.contains("strip subtitles")) {
+      return "quota";
+    }
+    // €8 Creator Pass features (or Watch 1 Rewarded Ad on Free Tier)
+    if (t.contains("1080p") ||
+        t.contains("auto-cut dead silence") ||
+        t.contains("9:16 viral") ||
+        t.contains("smooth 60 fps") ||
+        t.contains("studio mic enhancer") ||
+        t.contains("karaoke mode")) {
+      return "creator_or_ad";
+    }
+    // All other basic tools (720p, 480p, <10MB, <16MB, Privacy Shield, Burn/Extract SRT/VTT, 2x, 0.5x, GIF, MP3, WAV, Mute, Boost, Remux)
+    return "free";
+  }
+
+  Widget _buildPresetTierBadge(String title) {
+    final cat = _getPresetAccessCategory(title);
+    String label = "🆓 Free";
+    Color color = Colors.greenAccent;
+
+    if (cat == "pro_20_only") {
+      label = _userSubscriptionTier == "pro_20" ? "👑 Pro Unlocked" : "🔒 €20 Pro";
+      color = Colors.amberAccent;
+    } else if (cat == "quota") {
+      label = "⏱️ ${_dubbingMinutesRemaining}m / Ads";
+      color = Colors.tealAccent;
+    } else if (cat == "creator_or_ad") {
+      label = _userSubscriptionTier == "free" ? "💎 €8 or 🎬 1 Ad" : "💎 Unlocked";
+      color = Colors.cyanAccent;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.14),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: color.withOpacity(0.6), width: 0.8),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(color: color, fontSize: 9.5, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  Future<bool> _playRewardedAdDialog({required String rewardDescription}) async {
+    _ensureAccountAndAdsInitialized();
+    if (_activeAdProvider != "startio" && _isRewardedAdLoaded && _testRewardedAd != null) {
+      bool earned = false;
+      await _testRewardedAd!.show(
+        onUserEarnedReward: (_, __) {
+          earned = true;
+        },
+      );
+      _loadTestRewardedAd();
+      return earned;
+    }
+
+    int secondsLeft = 5;
+    bool completed = false;
+    bool claimed = false;
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setAdState) {
+            if (secondsLeft > 0) {
+              Future.delayed(const Duration(seconds: 1), () {
+                if (ctx.mounted && secondsLeft > 0) {
+                  setAdState(() => secondsLeft--);
+                  if (secondsLeft == 0) completed = true;
+                }
+              });
+            }
+            return AlertDialog(
+              backgroundColor: const Color(0xFF141414),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: const BorderSide(color: Colors.amberAccent, width: 1.2),
+              ),
+              title: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text("🎬 Start.io / AdMob Ad", style: TextStyle(color: Colors.amberAccent, fontSize: 15, fontWeight: FontWeight.bold)),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(6)),
+                    child: Text(secondsLeft > 0 ? "${secondsLeft}s" : "Reward Ready", style: const TextStyle(color: Colors.white, fontSize: 11)),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    height: 135,
+                    width: double.infinity,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(colors: [Colors.teal.shade900, Colors.black87]),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.tealAccent.withOpacity(0.4)),
+                    ),
+                    child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF121212),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.tealAccent.withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text("🎬 Export Resolution:", style: TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                            DropdownButton<String>(
+                              value: exportResolution,
+                              dropdownColor: const Color(0xFF222222),
+                              underline: const SizedBox(),
+                              isDense: true,
+                              style: TextStyle(
+                                color: _userSubscriptionTier == "free" ? Colors.greenAccent : (_userSubscriptionTier == "creator_8" ? Colors.tealAccent : Colors.amberAccent),
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              items: [
+                                const DropdownMenuItem(value: "720p", child: Text("720p HD (Free Tier)")),
+                                DropdownMenuItem(
+                                  value: "1080p",
+                                  child: Text(_userSubscriptionTier == "free" ? "🔒 1080p (Creator €8)" : "1080p Full HD"),
+                                ),
+                                DropdownMenuItem(
+                                  value: "4K",
+                                  child: Text(_userSubscriptionTier == "pro_20" ? "4K Ultra HD" : "🔒 4K (Pro Studio €20)"),
+                                ),
+                              ],
+                              onChanged: (val) {
+                                if (val == "4K" && _userSubscriptionTier != "pro_20") {
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("👑 4K Ultra HD export requires Pro Studio (€20/mo).")));
+                                  _showSubscriptionPaywall();
+                                  return;
+                                }
+                                if (val == "1080p" && _userSubscriptionTier == "free") {
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("💎 1080p Full HD export requires Creator Pass (€8/mo) or Pro Studio (€20/mo).")));
+                                  _showSubscriptionPaywall();
+                                  return;
+                                }
+                                if (val != null) setModalState(() => exportResolution = val);
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (_userSubscriptionTier == "free")
+                        Container(
+                          padding: const EdgeInsets.all(6),
+                          margin: const EdgeInsets.only(bottom: 8),
+                          decoration: BoxDecoration(color: Colors.amber.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                          child: const Text("ℹ️ Free Tier Export: Rendered in 720p with a subtle corner watermark. Upgrade to €8 for ad-free 1080p or €20 for 4K.", style: TextStyle(color: Colors.amberAccent, fontSize: 10.5)),
+                        ),
+
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.play_circle_fill_rounded, color: Colors.tealAccent, size: 40),
+                        const SizedBox(height: 6),
+                        const Text("Start.io App ID: $_startIoAppId", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12.5)),
+                        const SizedBox(height: 3),
+                        Text("AdMob Test Unit • Mode: ${_activeAdProvider.toUpperCase()}", style: const TextStyle(color: Colors.white70, fontSize: 10.5)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    secondsLeft > 0 ? "Watching ad to unlock: $rewardDescription..." : "✅ Ad finished! Tap below to claim $rewardDescription.",
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel", style: TextStyle(color: Colors.white38))),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: completed ? Colors.tealAccent : Colors.grey.shade800,
+                    foregroundColor: Colors.black,
+                  ),
+                  onPressed: completed
+                      ? () {
+                          claimed = true;
+                          Navigator.pop(ctx);
+                          _loadTestRewardedAd();
+                        }
+                      : null,
+                  child: Text(completed ? "Claim Reward" : "Wait ${secondsLeft}s..."),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    return claimed;
+  }
+
+  Future<void> _showRewardedAdForMinutes({int minutesToAdd = 2}) async {
+    final earned = await _playRewardedAdDialog(rewardDescription: "+$minutesToAdd Dubbing Minutes");
+    if (earned) {
+      setState(() {
+        _dubbingMinutesRemaining += minutesToAdd;
+        _saveAccountState();
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("🎉 +$minutesToAdd Dubbing Minutes added! Balance: $_dubbingMinutesRemaining mins.")),
+        );
+      }
+    }
+  }
+
+  Future<void> _runPresetWithQuotaGate(TranscodePreset p) async {
+    _ensureAccountAndAdsInitialized();
+    final String cat = _getPresetAccessCategory(p.title);
+
+    // 1. Always-Free tools
+    if (cat == "free") {
+      await _runPreset(p);
+      return;
+    }
+
+    // 2. €20 Pro Studio Exclusive tools (4K Ultra HD, AI Auto-Dub + Burn Subtitles)
+    if (cat == "pro_20_only" && _userSubscriptionTier != "pro_20") {
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          title: const Text("👑 Pro Studio (€20/mo) Exclusive", style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 16)),
+          content: Text(
+            "'${p.title}' is an exclusive Pro Studio feature.
+
+"
+            "Upgrade to Pro Studio (€20/mo) to unlock:
+"
+            "• 4K Ultra HD Cinema Remastering
+"
+            "• Combined AI Auto-Dub + Burned Subtitles
+"
+            "• ElevenLabs & Fish Audio Voice Cloning
+"
+            "• All 37 AI Models (up to 671B) & 250 Dubbing Mins/mo",
+            style: const TextStyle(color: Colors.white70, fontSize: 12.5),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel", style: TextStyle(color: Colors.white54))),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.amberAccent, foregroundColor: Colors.black),
+              onPressed: () {
+                Navigator.pop(ctx);
+                _showSubscriptionPaywall();
+              },
+              child: const Text("View €20 Pro Plan", style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // 3. €8 Creator Pass tools (1080p, Auto-Cut Silence, 9:16 Viral, 60 FPS, Denoise, Karaoke)
+    if (cat == "creator_or_ad" && _userSubscriptionTier == "free") {
+      bool unlockedSingleRun = false;
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          title: Text("💎 Unlock ${p.title}", style: const TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold, fontSize: 15.5)),
+          content: const Text(
+            "This studio tool is included unlimited & offline in the Creator Pass (€8/mo) and Pro Studio (€20/mo).
+
+"
+            "On the Free Tier, you can watch 1 quick ad to unlock it for this video, or upgrade for unlimited ad-free access.",
+            style: TextStyle(color: Colors.white70, fontSize: 12.5),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel", style: TextStyle(color: Colors.white54))),
+            OutlinedButton(
+              style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.tealAccent)),
+              onPressed: () {
+                Navigator.pop(ctx);
+                _showSubscriptionPaywall();
+              },
+              child: const Text("Go Creator (€8)", style: TextStyle(color: Colors.tealAccent)),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.amberAccent, foregroundColor: Colors.black),
+              icon: const Icon(Icons.play_circle_fill, size: 16),
+              label: const Text("Watch 1 Ad", style: TextStyle(fontWeight: FontWeight.bold)),
+              onPressed: () async {
+                Navigator.pop(ctx);
+                unlockedSingleRun = await _playRewardedAdDialog(rewardDescription: p.title);
+              },
+            ),
+          ],
+        ),
+      );
+      if (!unlockedSingleRun) return;
+      await _runPreset(p);
+      return;
+    }
+
+    // 4. Minute-Quota Gated tools (Auto-Dub, Auto-Subtitles, Auto-Transcribe, Strip Subtitles)
+    const int requiredMins = 5;
+    if (_dubbingMinutesRemaining < requiredMins) {
+      await _showQuotaReachedDialog(requiredMins, p);
+      return;
+    }
+
+    setState(() {
+      _dubbingMinutesRemaining = (_dubbingMinutesRemaining - requiredMins).clamp(0, 99999);
+      _saveAccountState();
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("🎬 Using $requiredMins mins from quota ($_dubbingMinutesRemaining mins left). 100% Local & Private.")),
+    );
+    await _runPreset(p);
+  }
+
+  Future<void> _showQuotaReachedDialog(int neededMins, TranscodePreset pendingPreset) async {
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        final int deficit = (neededMins - _dubbingMinutesRemaining).clamp(0, 999);
+        final int adsNeeded = ((deficit + 1) / 2).ceil();
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          title: const Text("⏱️ Dubbing & Subtitle Quota", style: TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold, fontSize: 16)),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  "Active Plan: ${_userSubscriptionTier == 'free' ? 'Free Tier (€0)' : _userSubscriptionTier == 'creator_8' ? 'Creator Pass (€8/mo)' : 'Pro Studio (€20/mo)'}",
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  "Remaining Balance: $_dubbingMinutesRemaining Mins (Need $neededMins Mins)",
+                  style: const TextStyle(color: Colors.amberAccent, fontSize: 12),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  "• Watch Rewarded Ads: Each ad grants +2 minutes (watch 2–3 ads for a 5-min video). Available for Free, €8, and €20 users whenever minutes run out.
+"
+                  "• Creator Pass (€8/mo): 60 Mins/month + ✈️ 100% Offline Airplane Mode + zero banner ads.
+"
+                  "• Pro Studio (€20/mo): 250 Mins/month + 4K + ElevenLabs/Fish Voice Cloning + All 37 AI Models.",
+                  style: TextStyle(color: Colors.white70, fontSize: 11.5),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.amber.shade700, foregroundColor: Colors.black),
+                    icon: const Icon(Icons.ondemand_video_rounded, size: 18),
+                    label: Text("Watch Ad (+2 Mins) • Need $adsNeeded Ad(s)"),
+                    onPressed: () async {
+                      Navigator.pop(ctx);
+                      await _showRewardedAdForMinutes(minutesToAdd: 2);
+                      if (_dubbingMinutesRemaining >= neededMins) {
+                        await _runPresetWithQuotaGate(pendingPreset);
+                      } else {
+                        await _showQuotaReachedDialog(neededMins, pendingPreset);
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.tealAccent)),
+                    icon: const Icon(Icons.diamond_outlined, color: Colors.tealAccent, size: 18),
+                    label: const Text("Upgrade Plan (€8 / €20)", style: TextStyle(color: Colors.tealAccent)),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _showSubscriptionPaywall();
+                    },
+                  ),
+                ),
+                if (_userSubscriptionTier == "pro_20") ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.purpleAccent)),
+                      icon: const Icon(Icons.business_center_rounded, color: Colors.purpleAccent, size: 18),
+                      label: const Text("Contact for Custom Studio License", style: TextStyle(color: Colors.purpleAccent)),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text("📧 Enterprise Licensing: Contact Avender Ltd Studio Team for custom commercial volume.")),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Close", style: TextStyle(color: Colors.white54))),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<bool> _promptAccountSignIn() async {
+    final TextEditingController emailCtrl = TextEditingController(text: _signedInUserEmail ?? "");
+    final TextEditingController passCtrl = TextEditingController();
+    bool signedIn = false;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Row(
+          children: [
+            Icon(Icons.account_circle_rounded, color: Colors.tealAccent),
+            SizedBox(width: 8),
+            Text("Account Sign-In & Sync", style: TextStyle(color: Colors.tealAccent, fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Sign in to link your subscription plan (€8 / €20) and dubbing minutes across your phone and laptop.",
+                style: TextStyle(color: Colors.white70, fontSize: 11.5),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: emailCtrl,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: InputDecoration(
+                  labelText: "Email or Google Play Account",
+                  labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
+                  prefixIcon: const Icon(Icons.email_outlined, color: Colors.tealAccent, size: 18),
+                  filled: true,
+                  fillColor: const Color(0xFF121212),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: passCtrl,
+                obscureText: true,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: InputDecoration(
+                  labelText: "Password (or leave blank for Google Play Auth)",
+                  labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
+                  prefixIcon: const Icon(Icons.lock_outline, color: Colors.tealAccent, size: 18),
+                  filled: true,
+                  fillColor: const Color(0xFF121212),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          if (_signedInUserEmail != null)
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _signedInUserEmail = null;
+                  _userSubscriptionTier = "free";
+                  _dubbingMinutesRemaining = 0;
+                  _saveAccountState();
+                });
+                Navigator.pop(ctx);
+              },
+              child: const Text("Sign Out", style: TextStyle(color: Colors.redAccent)),
+            ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel", style: TextStyle(color: Colors.white54))),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.tealAccent, foregroundColor: Colors.black),
+            icon: const Icon(Icons.verified_user_rounded, size: 16),
+            label: const Text("Sign In & Link Device", style: TextStyle(fontWeight: FontWeight.bold)),
+            onPressed: () {
+              final email = emailCtrl.text.trim();
+              if (email.isEmpty || !email.contains("@")) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Please enter a valid email address to link your account.")),
+                );
+                return;
+              }
+              setState(() {
+                _signedInUserEmail = email;
+                _saveAccountState();
+              });
+              signedIn = true;
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text("✅ Signed in as $_signedInUserEmail")),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+    return signedIn;
+  }
+
+  void _showSubscriptionPaywall() {
+    _ensureAccountAndAdsInitialized();
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setPaywallState) => AlertDialog(
+          backgroundColor: const Color(0xFF1E1E1E),
+          title: const Text("💎 Account, Plans & Ad Tester", style: TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold, fontSize: 16)),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Account Profile Bar
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF121212),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.tealAccent.withOpacity(0.4)),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _signedInUserEmail != null ? "👤 $_signedInUserEmail" : "👤 Guest Mode (Not Signed In)",
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              "⏱️ Quota: $_dubbingMinutesRemaining Mins • 100% Local Privacy",
+                              style: const TextStyle(color: Colors.amberAccent, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () async {
+                          await _promptAccountSignIn();
+                          if (ctx.mounted) setPaywallState(() {});
+                        },
+                        child: Text(
+                          _signedInUserEmail != null ? "Account" : "Sign In",
+                          style: const TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold, fontSize: 11.5),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _buildPlanTile(
+                  "Free Tier (€0/mo)",
+                  "• 720p/480p, <10MB/<16MB, MP3/WAV, GIF, Speed, Extract SRT, Models #1–#7 (0.5B–1.7B)
+• Bottom banner ad + watch 2–3 ads to unlock 5m dubbing",
+                  "free",
+                  Colors.white54,
+                  setPaywallState,
+                ),
+                const SizedBox(height: 8),
+                _buildPlanTile(
+                  "Creator Pass (€8/mo)",
+                  "• Zero banner ads + ✈️ 100% Offline Airplane Mode
+• 60 Mins/mo Auto-Dub & Subtitles + 1080p Full HD
+• Unlocks Auto-Cut Silence, 9:16 Viral, 60 FPS, Denoise, Karaoke & Models #1–#19 (up to 7B)
+• Out of minutes? Watch ads for bonus minutes!",
+                  "creator_8",
+                  Colors.tealAccent,
+                  setPaywallState,
+                ),
+                const SizedBox(height: 8),
+                _buildPlanTile(
+                  "Pro Studio (€20/mo)",
+                  "• 250 Mins/mo + 👑 4K Ultra HD + Auto-Dub & Burn Subtitles Together
+• 🔑 ElevenLabs & Fish Audio Voice Cloning
+• Unlocks All 37 AI Models (up to 671B) + Custom License option",
+                  "pro_20",
+                  Colors.amberAccent,
+                  setPaywallState,
+                ),
+                const Divider(color: Colors.white24, height: 20),
+                const Text("🧪 Ad Network Switcher (AdMob Test + Start.io #209515884):", style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 6,
+                  children: [
+                    ChoiceChip(
+                      label: const Text("Both", style: TextStyle(fontSize: 10.5)),
+                      selected: _activeAdProvider == "both",
+                      onSelected: (_) => setPaywallState(() => setState(() => _activeAdProvider = "both")),
+                    ),
+                    ChoiceChip(
+                      label: const Text("AdMob Test", style: TextStyle(fontSize: 10.5)),
+                      selected: _activeAdProvider == "admob",
+                      onSelected: (_) => setPaywallState(() => setState(() => _activeAdProvider = "admob")),
+                    ),
+                    ChoiceChip(
+                      label: const Text("Start.io (209515884)", style: TextStyle(fontSize: 10.5)),
+                      selected: _activeAdProvider == "startio",
+                      onSelected: (_) => setPaywallState(() => setState(() => _activeAdProvider = "startio")),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.teal.shade800, foregroundColor: Colors.white),
+                    icon: const Icon(Icons.play_circle_outline, size: 16),
+                    label: const Text("Watch Test Rewarded Ad (+2 Mins)", style: TextStyle(fontSize: 11.5)),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _showRewardedAdForMinutes(minutesToAdd: 2);
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Close", style: TextStyle(color: Colors.tealAccent))),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlanTile(String name, String desc, String tierId, Color color, StateSetter setPaywallState) {
+    final bool isSelected = _userSubscriptionTier == tierId;
+    return InkWell(
+      onTap: () async {
+        if (tierId != "free" && _signedInUserEmail == null) {
+          final ok = await _promptAccountSignIn();
+          if (!ok) return;
+        }
+        setState(() {
+          _userSubscriptionTier = tierId;
+          if (tierId == "free") {
+            _dubbingMinutesRemaining = 0;
+            _loadAdMobBanner();
+          } else if (tierId == "creator_8") {
+            _dubbingMinutesRemaining = 60;
+          } else if (tierId == "pro_20") {
+            _dubbingMinutesRemaining = 250;
+          }
+          _saveAccountState();
+        });
+        if (mounted) Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("✅ Activated $name ($_dubbingMinutesRemaining mins balance)")),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: isSelected ? color.withOpacity(0.15) : const Color(0xFF121212),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: isSelected ? color : Colors.white24, width: isSelected ? 1.5 : 1.0),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(name, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13.5)),
+                if (isSelected) Icon(Icons.check_circle, color: color, size: 16),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(desc, style: const TextStyle(color: Colors.white70, fontSize: 10.5)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAppBarTierBadge() {
+    _ensureAccountAndAdsInitialized();
+    final String label = _userSubscriptionTier == "free"
+        ? "🆓 Free (${_dubbingMinutesRemaining}m)"
+        : _userSubscriptionTier == "creator_8"
+            ? "💎 €8 (${_dubbingMinutesRemaining}m)"
+            : "👑 €20 (${_dubbingMinutesRemaining}m)";
+    return InkWell(
+      onTap: _showSubscriptionPaywall,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.amberAccent.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: Colors.amberAccent, width: 0.8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(_signedInUserEmail != null ? Icons.verified_user : Icons.account_circle_outlined, color: Colors.amberAccent, size: 12),
+            const SizedBox(width: 4),
+            Text(label, style: const TextStyle(color: Colors.amberAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFreeTierAdBanner() {
+    _ensureAccountAndAdsInitialized();
+    if (_userSubscriptionTier != "free") return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      height: 54,
+      decoration: const BoxDecoration(
+        color: Color(0xFF121212),
+        border: Border(top: BorderSide(color: Colors.white12, width: 0.8)),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Row(
+        children: [
+          if (_activeAdProvider != "startio" && _isAdMobBannerLoaded && _adMobBanner != null)
+            SizedBox(width: 160, height: 50, child: AdWidget(ad: _adMobBanner!))
+          else
+            Expanded(
+              child: Row(
+                children: [
+                  const Icon(Icons.campaign_rounded, color: Colors.amberAccent, size: 16),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _activeAdProvider == "admob" ? "AdMob Test Banner (320x50)" : "Start.io Ad (#$_startIoAppId)",
+                      style: const TextStyle(color: Colors.white70, fontSize: 10.5),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          TextButton(
+            style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6)),
+            onPressed: () => _showRewardedAdForMinutes(minutesToAdd: 2),
+            child: const Text("🎬 +2m Ad", style: TextStyle(color: Colors.amberAccent, fontSize: 10.5, fontWeight: FontWeight.bold)),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6)),
+            onPressed: _showSubscriptionPaywall,
+            child: const Text("💎 Plans", style: TextStyle(color: Colors.tealAccent, fontSize: 10.5, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Pro Media Studio',
@@ -5384,6 +6263,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     String previewLangCode = "ar";
     bool isPlayingSample = false;
 
+    // Added Export Quality & Watermark parameters to Dubbing Dialog
+    String exportResolution = _userSubscriptionTier == "free" ? "720p" : (_userSubscriptionTier == "creator_8" ? "1080p" : "4K");
+    
     return await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) {
@@ -7115,7 +7997,22 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
 
   Future<void> _sendChatMessage(
-      {bool forceVoiceReply = false, bool isFromLiveCall = false}) async {
+      {
+    if (_userSubscriptionTier == "free") {
+      // Track free AI chat messages
+      _freeChatMessagesUsed = (_freeChatMessagesUsed ?? 0) + 1;
+      if (_freeChatMessagesUsed > 10) {
+        bool earnedAd = await _playRewardedAdDialog(rewardDescription: "+10 AI Chat Messages");
+        if (!earnedAd) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("⚠️ Free AI chat limit reached. Watch an ad or upgrade to €8/€20 for unlimited chat.")),
+          );
+          return;
+        }
+        _freeChatMessagesUsed = 0;
+      }
+    }
+bool forceVoiceReply = false, bool isFromLiveCall = false}) async {
     final text = _chatController.text.trim();
     if (text.isEmpty && _attachedVisionFile == null) return;
     if (_isAiGenerating) return;
@@ -7334,6 +8231,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     return DefaultTabController(
       length: 6,
       child: Scaffold(
+        bottomNavigationBar: _buildFreeTierAdBanner(),
         appBar: AppBar(
           backgroundColor: const Color(0xFF181818),
           elevation: 0,
@@ -7410,9 +8308,15 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                             subtitle: Text(p.subtitle,
                                 style: const TextStyle(
                                     color: Colors.white60, fontSize: 12)),
-                            trailing: const Icon(Icons.play_arrow_rounded,
-                                color: Colors.tealAccent),
-                            onTap: () => _runPreset(p),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _buildPresetTierBadge(p.title),
+                                const SizedBox(width: 6),
+                                const Icon(Icons.play_arrow_rounded, color: Colors.tealAccent),
+                              ],
+                            ),
+                            onTap: () => _runPresetWithQuotaGate(p),
                           ),
                         );
                       },

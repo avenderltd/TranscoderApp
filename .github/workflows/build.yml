@@ -14,7 +14,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-      
+
       - name: Create Base Flutter App & Inject Code
         run: |
           flutter create app
@@ -23,106 +23,7 @@ jobs:
           cp AndroidManifest.xml app/android/app/src/main/AndroidManifest.xml
           sed -i 's/flutter.minSdkVersion/28/g' app/android/app/build.gradle.kts
           sed -i 's/flutter.compileSdkVersion/37/g' app/android/app/build.gradle.kts
-          python3 - << 'PYEOF'
-          import glob
-          # Add Start.io SDK dependency to app/android/app/build.gradle.kts
-          gradle_kts = "app/android/app/build.gradle.kts"
-          with open(gradle_kts, "r") as gf:
-              g_txt = gf.read()
-          if "com.startapp:inapp-sdk" not in g_txt:
-              g_txt += '\ndependencies {\n    implementation("com.startapp:inapp-sdk:5.3.2")\n}\n'
-              with open(gradle_kts, "w") as gf:
-                  gf.write(g_txt)
 
-          # Inject Start.io (209515884) MethodChannel into MainActivity.kt
-          kt_files = glob.glob("app/android/app/src/main/kotlin/**/MainActivity.kt", recursive=True)
-          if kt_files:
-              kt_path = kt_files[0]
-              with open(kt_path, "r") as kf:
-                  first_line = kf.readline().strip()
-              kt_code = first_line + '''
-
-import android.os.Bundle
-import io.flutter.embedding.android.FlutterActivity
-import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.MethodChannel
-import com.startapp.sdk.adsbase.Ad
-import com.startapp.sdk.adsbase.StartAppAd
-import com.startapp.sdk.adsbase.StartAppSDK
-import com.startapp.sdk.adsbase.adlisteners.AdDisplayListener
-import com.startapp.sdk.adsbase.adlisteners.AdEventListener
-
-class MainActivity : FlutterActivity() {
-    private val CHANNEL = "pro_media_studio/startio"
-    private var startIoInitialized = false
-
-    private fun ensureStartIoInit(testMode: Boolean) {
-        if (!startIoInitialized) {
-            startIoInitialized = true
-            StartAppSDK.initParams(applicationContext, "209515884")
-                .setReturnAdsEnabled(false)
-                .init()
-        }
-        StartAppSDK.setTestAdsEnabled(testMode)
-    }
-
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
-            when (call.method) {
-                "initStartIo" -> {
-                    val testMode = call.argument<Boolean>("testMode") ?: true
-                    ensureStartIoInit(testMode)
-                    result.success(true)
-                }
-                "showRewardedAd" -> {
-                    val testMode = call.argument<Boolean>("testMode") ?: true
-                    ensureStartIoInit(testMode)
-                    val rewardedAd = StartAppAd(this@MainActivity)
-                    var rewardGranted = false
-                    var replied = false
-
-                    rewardedAd.setVideoListener {
-                        rewardGranted = true
-                    }
-
-                    rewardedAd.loadAd(StartAppAd.AdMode.REWARDED_VIDEO, object : AdEventListener {
-                        override fun onReceiveAd(ad: Ad) {
-                            rewardedAd.showAd(object : AdDisplayListener {
-                                override fun adHidden(ad: Ad) {
-                                    if (!replied) {
-                                        replied = true
-                                        result.success(rewardGranted)
-                                    }
-                                }
-                                override fun adDisplayed(ad: Ad) {}
-                                override fun adClicked(ad: Ad) {}
-                                override fun adNotDisplayed(ad: Ad) {
-                                    if (!replied) {
-                                        replied = true
-                                        result.success(false)
-                                    }
-                                }
-                            })
-                        }
-                        override fun onFailedToReceiveAd(ad: Ad?) {
-                            if (!replied) {
-                                replied = true
-                                result.success(false)
-                            }
-                        }
-                    })
-                }
-                else -> result.notImplemented()
-            }
-        }
-    }
-}
-'''
-              with open(kt_path, "w") as kf:
-                  kf.write(kt_code)
-          PYEOF
-          
       - name: Build APK
         run: |
           yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
@@ -130,7 +31,7 @@ class MainActivity : FlutterActivity() {
           flutter pub get
           find /home/runner/.pub-cache/ -name "build.gradle*" -exec sed -i 's/compileSdkVersion [0-9][0-9]/compileSdkVersion 37/g; s/compileSdk [0-9][0-9]/compileSdk 37/g; s/compileSdk = [0-9][0-9]/compileSdk = 37/g' {} +
           flutter build apk --release --split-per-abi
-          
+
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:

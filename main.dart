@@ -1,5 +1,3 @@
-import 'package:flutter/services.dart';
-import 'package:google_mobile_ads/google_mobile_ads.dart';
 // ============================================================================
 // FILE: main.dart — PART 1 OF 3 (COMPLETE • LINE-BY-LINE VERIFIED)
 // Includes:
@@ -7421,87 +7419,36 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   static const String _startIoAppId = "209515884";
   static const String _adMobTestBannerId = "ca-app-pub-3940256099942544/6300978111";
   static const String _adMobTestRewardedId = "ca-app-pub-3940256099942544/5224354917";
-  static const MethodChannel _startIoChannel = MethodChannel('pro_media_studio/startio');
-  BannerAd? _adMobBanner;
-  bool _isAdMobBannerLoaded = false;
-  RewardedAd? _adMobRewardedAd;
-  bool _isAdMobRewardedLoaded = false;
-  bool _adsSdkInitialized = false;
-  bool _startIoTestAdsEnabled = true;
   bool _accountStateLoaded = false;
 
-  File get _accountStateFile => File('${Directory.systemTemp.path}/pms_account_state.json');
-
-  void _ensureAccountInitialized() {
-    if (!_accountStateLoaded) {
-      _accountStateLoaded = true;
+  void _scheduleSafeAccountLoad() {
+    if (_accountStateLoaded) return;
+    _accountStateLoaded = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
-        if (_accountStateFile.existsSync()) {
-          final data = jsonDecode(_accountStateFile.readAsStringSync());
-          _signedInUserEmail = data['email'];
-          _userSubscriptionTier = data['tier'] ?? 'free';
-          _dubbingMinutesRemaining = data['mins'] ?? 0;
+        final dir = await getApplicationDocumentsDirectory();
+        final file = File('${dir.path}/pms_account_state.json');
+        if (await file.exists()) {
+          final data = jsonDecode(await file.readAsString());
+          if (!mounted) return;
+          setState(() {
+            _signedInUserEmail = data['email'];
+            _userSubscriptionTier = data['tier'] ?? 'free';
+            _dubbingMinutesRemaining = data['mins'] ?? 0;
+            _selectedDubExportResolution = _userSubscriptionTier == 'pro_20'
+                ? '4K'
+                : (_userSubscriptionTier == 'creator_8' ? '1080p' : '720p');
+          });
         }
       } catch (_) {}
-    }
-    if (!_adsSdkInitialized && Platform.isAndroid) {
-      _adsSdkInitialized = true;
-      try {
-        MobileAds.instance.initialize().then((_) {
-          _loadAdMobBanner();
-          _loadAdMobRewardedAd();
-        });
-      } catch (_) {}
-      try {
-        _startIoChannel.invokeMethod('initStartIo', {'testMode': _startIoTestAdsEnabled});
-      } catch (_) {}
-    }
+    });
   }
 
-  void _loadAdMobBanner() {
-    if (!Platform.isAndroid || _userSubscriptionTier != "free") return;
+  Future<void> _saveAccountState() async {
     try {
-      _adMobBanner?.dispose();
-      _adMobBanner = BannerAd(
-        adUnitId: _adMobTestBannerId,
-        size: AdSize.banner,
-        request: const AdRequest(),
-        listener: BannerAdListener(
-          onAdLoaded: (_) {
-            if (mounted) setState(() => _isAdMobBannerLoaded = true);
-          },
-          onAdFailedToLoad: (ad, _) {
-            ad.dispose();
-            if (mounted) setState(() => _isAdMobBannerLoaded = false);
-          },
-        ),
-      )..load();
-    } catch (_) {}
-  }
-
-  void _loadAdMobRewardedAd() {
-    if (!Platform.isAndroid) return;
-    try {
-      RewardedAd.load(
-        adUnitId: _adMobTestRewardedId,
-        request: const AdRequest(),
-        rewardedAdLoadCallback: RewardedAdLoadCallback(
-          onAdLoaded: (ad) {
-            _adMobRewardedAd = ad;
-            _isAdMobRewardedLoaded = true;
-          },
-          onAdFailedToLoad: (_) {
-            _adMobRewardedAd = null;
-            _isAdMobRewardedLoaded = false;
-          },
-        ),
-      );
-    } catch (_) {}
-  }
-
-  void _saveAccountState() {
-    try {
-      _accountStateFile.writeAsStringSync(jsonEncode({
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/pms_account_state.json');
+      await file.writeAsString(jsonEncode({
         'email': _signedInUserEmail,
         'tier': _userSubscriptionTier,
         'mins': _dubbingMinutesRemaining,
@@ -7515,7 +7462,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   }
 
   bool _checkAiModelTierAccess(String modelTitle) {
-    _ensureAccountInitialized();
     final int modelNum = _getModelNumberFromTitle(modelTitle);
     if (modelNum >= 20 && _userSubscriptionTier != "pro_20") {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -7557,7 +7503,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   }
 
   Widget _buildPresetTierBadge(String title) {
-    _ensureAccountInitialized();
     final cat = _getPresetAccessCategory(title);
     String label = "🆓 Free";
     Color color = Colors.greenAccent;
@@ -7588,54 +7533,13 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   }
 
   Future<bool> _playRewardedAdDialog({required String rewardDescription}) async {
-    _ensureAccountInitialized();
-
-    // 1. Try Real Google AdMob Rewarded Video (when mode is 'admob' or 'both')
-    if (Platform.isAndroid && _activeAdProvider != "startio" && _isAdMobRewardedLoaded && _adMobRewardedAd != null) {
-      final Completer<bool> completer = Completer<bool>();
-      bool rewardEarned = false;
-      _adMobRewardedAd!.fullScreenContentCallback = FullScreenContentCallback(
-        onAdDismissedFullScreenContent: (ad) {
-          ad.dispose();
-          _adMobRewardedAd = null;
-          _isAdMobRewardedLoaded = false;
-          _loadAdMobRewardedAd();
-          if (!completer.isCompleted) completer.complete(rewardEarned);
-        },
-        onAdFailedToShowFullScreenContent: (ad, _) {
-          ad.dispose();
-          _adMobRewardedAd = null;
-          _isAdMobRewardedLoaded = false;
-          _loadAdMobRewardedAd();
-          if (!completer.isCompleted) completer.complete(false);
-        },
-      );
-      await _adMobRewardedAd!.show(
-        onUserEarnedReward: (_, __) {
-          rewardEarned = true;
-        },
-      );
-      final bool adMobSuccess = await completer.future;
-      if (adMobSuccess) return true;
-    }
-
-    // 2. Try Real Start.io Native SDK Rewarded Video (App ID: 209515884) when mode is 'startio' or 'both'
-    if (Platform.isAndroid && _activeAdProvider != "admob") {
-      try {
-        final bool? startIoEarned = await _startIoChannel.invokeMethod<bool>(
-          'showRewardedAd',
-          {'testMode': _startIoTestAdsEnabled},
-        );
-        if (startIoEarned == true) return true;
-      } catch (_) {}
-    }
     int secondsLeft = 5;
     bool completed = false;
     bool claimed = false;
     final String activeNetLabel = _activeAdProvider == "admob"
-        ? "Google AdMob Test Rewarded Unit"
+        ? "Google AdMob Test Rewarded Video"
         : (_activeAdProvider == "startio"
-            ? "Start.io Rewarded Ad (#$_startIoAppId)"
+            ? "Start.io Rewarded Video (#$_startIoAppId)"
             : "AdMob Test + Start.io (#$_startIoAppId)");
 
     await showDialog(
@@ -7688,7 +7592,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         const SizedBox(height: 6),
                         Text(activeNetLabel, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.center),
                         const SizedBox(height: 4),
-                        const Text("AdMob ID: ...5224354917 • Start.io: 209515884", style: TextStyle(color: Colors.white60, fontSize: 10)),
+                        const Text("AdMob Unit: ...5224354917 • Start.io ID: 209515884", style: TextStyle(color: Colors.white60, fontSize: 10)),
                       ],
                     ),
                   ),
@@ -7731,8 +7635,8 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     if (earned) {
       setState(() {
         _dubbingMinutesRemaining += minutesToAdd;
-        _saveAccountState();
       });
+      await _saveAccountState();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text("🎉 +$minutesToAdd Dubbing Minutes added! (Balance: $_dubbingMinutesRemaining mins)")),
@@ -7742,7 +7646,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   }
 
   Future<void> _runPresetWithQuotaGate(dynamic p) async {
-    _ensureAccountInitialized();
     final String title = p.title.toString();
     final String cat = _getPresetAccessCategory(title);
 
@@ -7823,11 +7726,13 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
     setState(() {
       _dubbingMinutesRemaining = (_dubbingMinutesRemaining - requiredMins).clamp(0, 99999);
-      _saveAccountState();
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("🎬 Using $requiredMins mins from quota ($_dubbingMinutesRemaining mins left). 100% Local & Private.")),
-    );
+    await _saveAccountState();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("🎬 Using $requiredMins mins from quota ($_dubbingMinutesRemaining mins left). 100% Local & Private.")),
+      );
+    }
     await _runPreset(p);
   }
 
@@ -7976,14 +7881,14 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         actions: [
           if (_signedInUserEmail != null)
             TextButton(
-              onPressed: () {
+              onPressed: () async {
                 setState(() {
                   _signedInUserEmail = null;
                   _userSubscriptionTier = "free";
                   _dubbingMinutesRemaining = 0;
-                  _saveAccountState();
                 });
-                Navigator.pop(ctx);
+                await _saveAccountState();
+                if (ctx.mounted) Navigator.pop(ctx);
               },
               child: const Text("Sign Out", style: TextStyle(color: Colors.redAccent)),
             ),
@@ -7992,7 +7897,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: Colors.tealAccent, foregroundColor: Colors.black),
             icon: const Icon(Icons.verified_user_rounded, size: 16),
             label: const Text("Sign In & Link", style: TextStyle(fontWeight: FontWeight.bold)),
-            onPressed: () {
+            onPressed: () async {
               final email = emailCtrl.text.trim();
               if (email.isEmpty || !email.contains("@")) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -8002,13 +7907,15 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               }
               setState(() {
                 _signedInUserEmail = email;
-                _saveAccountState();
               });
+              await _saveAccountState();
               signedIn = true;
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text("✅ Signed in as $_signedInUserEmail")),
-              );
+              if (ctx.mounted) Navigator.pop(ctx);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text("✅ Signed in as $_signedInUserEmail")),
+                );
+              }
             },
           ),
         ],
@@ -8018,7 +7925,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   }
 
   void _showSubscriptionPaywall() {
-    _ensureAccountInitialized();
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -8158,12 +8064,14 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             _dubbingMinutesRemaining = 250;
             _selectedDubExportResolution = "4K";
           }
-          _saveAccountState();
         });
+        await _saveAccountState();
         if (mounted) Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("✅ Activated $name ($_dubbingMinutesRemaining mins balance)")),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("✅ Activated $name ($_dubbingMinutesRemaining mins balance)")),
+          );
+        }
       },
       child: Container(
         padding: const EdgeInsets.all(10),
@@ -8191,7 +8099,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   }
 
   Widget _buildAppBarTierBadge() {
-    _ensureAccountInitialized();
+    _scheduleSafeAccountLoad();
     final String label = _userSubscriptionTier == "free"
         ? "🆓 Free (${_dubbingMinutesRemaining}m)"
         : _userSubscriptionTier == "creator_8"
@@ -8220,11 +8128,10 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   }
 
   Widget _buildFreeTierAdBanner() {
-    _ensureAccountInitialized();
     if (_userSubscriptionTier != "free") return const SizedBox.shrink();
     return Container(
       width: double.infinity,
-      height: 54,
+      height: 52,
       decoration: const BoxDecoration(
         color: Color(0xFF121212),
         border: Border(top: BorderSide(color: Colors.white12, width: 0.8)),
@@ -8232,26 +8139,19 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
-          if (_activeAdProvider != "startio" && _isAdMobBannerLoaded && _adMobBanner != null)
-            Expanded(
-              child: SizedBox(
-                height: 50,
-                child: AdWidget(ad: _adMobBanner!),
-              ),
-            )
-          else ...[
-            const Icon(Icons.campaign_rounded, color: Colors.amberAccent, size: 16),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                _activeAdProvider == "admob"
-                    ? "Loading AdMob Banner..."
-                    : "Start.io Active (#$_startIoAppId)",
-                style: const TextStyle(color: Colors.white70, fontSize: 10.5),
-                overflow: TextOverflow.ellipsis,
-              ),
+          const Icon(Icons.campaign_rounded, color: Colors.amberAccent, size: 16),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              _activeAdProvider == "admob"
+                  ? "AdMob Test Banner (320x50)"
+                  : (_activeAdProvider == "startio"
+                      ? "Start.io Ad (#$_startIoAppId)"
+                      : "AdMob / Start.io (#$_startIoAppId)"),
+              style: const TextStyle(color: Colors.white70, fontSize: 10.5),
+              overflow: TextOverflow.ellipsis,
             ),
-          ],
+          ),
           TextButton(
             style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6)),
             onPressed: () => _showRewardedAdForMinutes(minutesToAdd: 2),

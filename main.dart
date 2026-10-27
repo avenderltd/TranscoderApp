@@ -7421,24 +7421,143 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   static const String _adMobTestRewardedId = "ca-app-pub-3940256099942544/5224354917";
   bool _accountStateLoaded = false;
 
+  Map<String, dynamic> _accountsVault = {};
+  // Optional: Paste your Firebase Web API Key & Realtime DB URL here (or set via the ☁️ icon in the Sign-In dialog)
+  String _firebaseApiKey = "";
+  String _firebaseDbUrl = "";
+  String? _firebaseUid;
+  String? _firebaseIdToken;
+
+  bool get _isFirebaseConfigured =>
+      _firebaseApiKey.trim().isNotEmpty && _firebaseDbUrl.trim().isNotEmpty;
+
+  String _hashPassword(String email, String password) {
+    final String salted = "${email.trim().toLowerCase()}::pms_salt_2026::$password";
+    int hash1 = 0x811c9dc5;
+    int hash2 = 0x1000193;
+    for (int i = 0; i < salted.length; i++) {
+      final int c = salted.codeUnitAt(i);
+      hash1 ^= c;
+      hash1 = (hash1 * 0x01000193) & 0x7fffffff;
+      hash2 ^= (c * (i + 1));
+      hash2 = (hash2 * 0x85ebca6b) & 0x7fffffff;
+    }
+    return "${hash1.toRadixString(16).padLeft(8, '0')}${hash2.toRadixString(16).padLeft(8, '0')}";
+  }
+
+  String _emailKey(String email) =>
+      email.trim().toLowerCase().replaceAll('.', ',').replaceAll('#', '_').replaceAll('$', '_').replaceAll('[', '_').replaceAll(']', '_').replaceAll('/', '_');
+
+  Future<Map<String, dynamic>?> _firebaseAuthPost(String action, Map<String, dynamic> payload) async {
+    if (_firebaseApiKey.trim().isEmpty) return null;
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    try {
+      final uri = Uri.parse("https://identitytoolkit.googleapis.com/v1/accounts:$action?key=${_firebaseApiKey.trim()}");
+      final req = await client.postUrl(uri);
+      req.headers.set(HttpHeaders.contentTypeHeader, "application/json; charset=utf-8");
+      req.add(utf8.encode(jsonEncode(payload)));
+      final res = await req.close().timeout(const Duration(seconds: 10));
+      final body = await res.transform(utf8.decoder).join();
+      return jsonDecode(body) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<Map<String, dynamic>?> _firebaseFetchAccount(String email, {String? uid, String? idToken}) async {
+    if (!_isFirebaseConfigured) return null;
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    try {
+      final String base = _firebaseDbUrl.trim().replaceAll(RegExp(r'/$'), '');
+      final String node = (uid != null && uid.isNotEmpty) ? uid : _emailKey(email);
+      final String authParam = (idToken != null && idToken.isNotEmpty) ? "?auth=$idToken" : "";
+      final uri = Uri.parse("$base/pms_users/$node.json$authParam");
+      final req = await client.getUrl(uri);
+      final res = await req.close().timeout(const Duration(seconds: 8));
+      if (res.statusCode != 200) return null;
+      final body = await res.transform(utf8.decoder).join();
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      return null;
+    } catch (_) {
+      return null;
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> _firebasePushAccount(String email, Map<String, dynamic> record) async {
+    if (!_isFirebaseConfigured) return;
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    try {
+      final String base = _firebaseDbUrl.trim().replaceAll(RegExp(r'/$'), '');
+      final String node = (_firebaseUid != null && _firebaseUid!.isNotEmpty) ? _firebaseUid! : _emailKey(email);
+      final String authParam = (_firebaseIdToken != null && _firebaseIdToken!.isNotEmpty) ? "?auth=$_firebaseIdToken" : "";
+      final uri = Uri.parse("$base/pms_users/$node.json$authParam");
+      final req = await client.patchUrl(uri);
+      req.headers.set(HttpHeaders.contentTypeHeader, "application/json; charset=utf-8");
+      req.add(utf8.encode(jsonEncode(record)));
+      await req.close().timeout(const Duration(seconds: 8));
+    } catch (_) {
+    } finally {
+      client.close();
+    }
+  }
+
   void _scheduleSafeAccountLoad() {
     if (_accountStateLoaded) return;
     _accountStateLoaded = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
         final dir = await getApplicationDocumentsDirectory();
-        final file = File('${dir.path}/pms_account_state.json');
+        final file = File('${dir.path}/pms_accounts_vault.json');
         if (await file.exists()) {
           final data = jsonDecode(await file.readAsString());
           if (!mounted) return;
           setState(() {
-            _signedInUserEmail = data['email'];
-            _userSubscriptionTier = data['tier'] ?? 'free';
-            _dubbingMinutesRemaining = data['mins'] ?? 0;
+            _accountsVault = Map<String, dynamic>.from(data['accounts'] ?? {});
+            if ((data['firebaseApiKey'] ?? '').toString().isNotEmpty) {
+              _firebaseApiKey = data['firebaseApiKey'].toString();
+            }
+            if ((data['firebaseDbUrl'] ?? '').toString().isNotEmpty) {
+              _firebaseDbUrl = data['firebaseDbUrl'].toString();
+            }
+            _firebaseUid = data['firebaseUid'];
+            _firebaseIdToken = data['firebaseIdToken'];
+
+            final String? activeEmail = data['activeEmail'];
+            if (activeEmail != null && _accountsVault.containsKey(activeEmail)) {
+              final acc = Map<String, dynamic>.from(_accountsVault[activeEmail]);
+              _signedInUserEmail = activeEmail;
+              _userSubscriptionTier = acc['tier'] ?? 'free';
+              _dubbingMinutesRemaining = acc['mins'] ?? 0;
+            } else {
+              _signedInUserEmail = null;
+              _userSubscriptionTier = 'free';
+              _dubbingMinutesRemaining = data['guestMins'] ?? 0;
+            }
             _selectedDubExportResolution = _userSubscriptionTier == 'pro_20'
                 ? '4K'
                 : (_userSubscriptionTier == 'creator_8' ? '1080p' : '720p');
           });
+
+          // If signed in and Firebase is configured, silently sync latest quota from cloud
+          if (_signedInUserEmail != null && _isFirebaseConfigured) {
+            final cloudAcc = await _firebaseFetchAccount(
+              _signedInUserEmail!,
+              uid: _firebaseUid,
+              idToken: _firebaseIdToken,
+            );
+            if (cloudAcc != null && mounted) {
+              setState(() {
+                _userSubscriptionTier = cloudAcc['tier'] ?? _userSubscriptionTier;
+                _dubbingMinutesRemaining = cloudAcc['mins'] ?? _dubbingMinutesRemaining;
+                _accountsVault[_signedInUserEmail!] = cloudAcc;
+              });
+            }
+          }
         }
       } catch (_) {}
     });
@@ -7447,12 +7566,32 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   Future<void> _saveAccountState() async {
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/pms_account_state.json');
+      final file = File('${dir.path}/pms_accounts_vault.json');
+      int guestMins = 0;
+      Map<String, dynamic>? updatedRecord;
+      if (_signedInUserEmail != null && _accountsVault.containsKey(_signedInUserEmail)) {
+        final acc = Map<String, dynamic>.from(_accountsVault[_signedInUserEmail] ?? {});
+        acc['email'] = _signedInUserEmail;
+        acc['tier'] = _userSubscriptionTier;
+        acc['mins'] = _dubbingMinutesRemaining;
+        acc['updatedAt'] = DateTime.now().toIso8601String();
+        _accountsVault[_signedInUserEmail!] = acc;
+        updatedRecord = acc;
+      } else {
+        guestMins = _dubbingMinutesRemaining;
+      }
       await file.writeAsString(jsonEncode({
-        'email': _signedInUserEmail,
-        'tier': _userSubscriptionTier,
-        'mins': _dubbingMinutesRemaining,
+        'activeEmail': _signedInUserEmail,
+        'guestMins': guestMins,
+        'firebaseApiKey': _firebaseApiKey,
+        'firebaseDbUrl': _firebaseDbUrl,
+        'firebaseUid': _firebaseUid,
+        'firebaseIdToken': _firebaseIdToken,
+        'accounts': _accountsVault,
       }));
+      if (_signedInUserEmail != null && updatedRecord != null && _isFirebaseConfigured) {
+        await _firebasePushAccount(_signedInUserEmail!, updatedRecord);
+      }
     } catch (_) {}
   }
 
@@ -7823,20 +7962,27 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     );
   }
 
-  Future<bool> _promptAccountSignIn() async {
-    final TextEditingController emailCtrl = TextEditingController(text: _signedInUserEmail ?? "");
-    final TextEditingController passCtrl = TextEditingController();
-    bool signedIn = false;
-
+  Future<void> _showFirebaseSetupModal(StateSetter setParentState) async {
+    final apiCtrl = TextEditingController(text: _firebaseApiKey);
+    final dbCtrl = TextEditingController(text: _firebaseDbUrl);
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
+        backgroundColor: const Color(0xFF161616),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: Colors.amberAccent),
+        ),
         title: const Row(
           children: [
-            Icon(Icons.account_circle_rounded, color: Colors.tealAccent),
+            Icon(Icons.cloud_sync_rounded, color: Colors.amberAccent, size: 20),
             SizedBox(width: 8),
-            Text("Account Sign-In & Sync", style: TextStyle(color: Colors.tealAccent, fontSize: 16, fontWeight: FontWeight.bold)),
+            Expanded(
+              child: Text(
+                "Firebase Cloud Sync Setup",
+                style: TextStyle(color: Colors.amberAccent, fontSize: 15, fontWeight: FontWeight.bold),
+              ),
+            ),
           ],
         ),
         content: SingleChildScrollView(
@@ -7845,33 +7991,31 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                "Sign in to link your subscription tier (€8 / €20) and dubbing minutes across your devices.",
+                "Connect your free Firebase project (Spark Plan) to sync accounts, passwords, and minute quotas across devices and prevent reinstall resets.\n\n"
+                "Leave blank to use 100% local encrypted device vault.",
                 style: TextStyle(color: Colors.white70, fontSize: 11.5),
               ),
               const SizedBox(height: 12),
               TextField(
-                controller: emailCtrl,
-                style: const TextStyle(color: Colors.white, fontSize: 13),
+                controller: apiCtrl,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
                 decoration: InputDecoration(
-                  labelText: "Email or Google Play Account",
-                  labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
-                  prefixIcon: const Icon(Icons.email_outlined, color: Colors.tealAccent, size: 18),
+                  labelText: "Firebase Web API Key (AIzaSy...)",
+                  labelStyle: const TextStyle(color: Colors.white60, fontSize: 11.5),
                   filled: true,
-                  fillColor: const Color(0xFF121212),
+                  fillColor: const Color(0xFF101010),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 ),
               ),
               const SizedBox(height: 10),
               TextField(
-                controller: passCtrl,
-                obscureText: true,
-                style: const TextStyle(color: Colors.white, fontSize: 13),
+                controller: dbCtrl,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
                 decoration: InputDecoration(
-                  labelText: "Password (or leave blank for Google Play Auth)",
-                  labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
-                  prefixIcon: const Icon(Icons.lock_outline, color: Colors.tealAccent, size: 18),
+                  labelText: "Realtime DB URL (https://your-app.firebasedatabase.app)",
+                  labelStyle: const TextStyle(color: Colors.white60, fontSize: 11.5),
                   filled: true,
-                  fillColor: const Color(0xFF121212),
+                  fillColor: const Color(0xFF101010),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 ),
               ),
@@ -7879,46 +8023,577 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           ),
         ),
         actions: [
-          if (_signedInUserEmail != null)
-            TextButton(
-              onPressed: () async {
-                setState(() {
-                  _signedInUserEmail = null;
-                  _userSubscriptionTier = "free";
-                  _dubbingMinutesRemaining = 0;
-                });
-                await _saveAccountState();
-                if (ctx.mounted) Navigator.pop(ctx);
-              },
-              child: const Text("Sign Out", style: TextStyle(color: Colors.redAccent)),
-            ),
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel", style: TextStyle(color: Colors.white54))),
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.tealAccent, foregroundColor: Colors.black),
-            icon: const Icon(Icons.verified_user_rounded, size: 16),
-            label: const Text("Sign In & Link", style: TextStyle(fontWeight: FontWeight.bold)),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancel", style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.amberAccent, foregroundColor: Colors.black),
             onPressed: () async {
-              final email = emailCtrl.text.trim();
-              if (email.isEmpty || !email.contains("@")) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Please enter a valid email address.")),
-                );
-                return;
-              }
               setState(() {
-                _signedInUserEmail = email;
+                _firebaseApiKey = apiCtrl.text.trim();
+                _firebaseDbUrl = dbCtrl.text.trim();
               });
               await _saveAccountState();
-              signedIn = true;
+              setParentState(() {});
               if (ctx.mounted) Navigator.pop(ctx);
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text("✅ Signed in as $_signedInUserEmail")),
+                  SnackBar(
+                    content: Text(
+                      _isFirebaseConfigured
+                          ? "☁️ Firebase Cloud Auth & Quota Sync enabled!"
+                          : "🔒 Using Local Encrypted Device Vault.",
+                    ),
+                  ),
                 );
               }
             },
+            child: const Text("Save Cloud Config", style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
+      ),
+    );
+  }
+
+  Future<bool> _promptAccountSignIn() async {
+    final TextEditingController emailCtrl = TextEditingController(text: _signedInUserEmail ?? "");
+    final TextEditingController passCtrl = TextEditingController();
+    final TextEditingController confirmPassCtrl = TextEditingController();
+    final TextEditingController pinCtrl = TextEditingController();
+    bool isRegisterMode = _accountsVault.isEmpty && _signedInUserEmail == null;
+    bool isResetMode = false;
+    bool obscurePass = true;
+    bool isBusy = false;
+    String? errorMsg;
+    bool signedIn = false;
+
+    final RegExp emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setAuthState) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: Colors.tealAccent, width: 1),
+          ),
+          title: Row(
+            children: [
+              const Icon(Icons.lock_person_rounded, color: Colors.tealAccent),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  isResetMode
+                      ? "Reset Account Password"
+                      : (isRegisterMode ? "Create Studio Account" : "Sign In to Account"),
+                  style: const TextStyle(color: Colors.tealAccent, fontSize: 15, fontWeight: FontWeight.bold),
+                ),
+              ),
+              InkWell(
+                onTap: () => _showFirebaseSetupModal(setAuthState),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: _isFirebaseConfigured ? Colors.teal.withOpacity(0.25) : Colors.white10,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: _isFirebaseConfigured ? Colors.tealAccent : Colors.white24),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _isFirebaseConfigured ? Icons.cloud_done_rounded : Icons.cloud_outlined,
+                        color: _isFirebaseConfigured ? Colors.tealAccent : Colors.white70,
+                        size: 13,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _isFirebaseConfigured ? "Firebase ON" : "Cloud",
+                        style: TextStyle(
+                          color: _isFirebaseConfigured ? Colors.tealAccent : Colors.white70,
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (!isResetMode)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF101010),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.white12),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: () => setAuthState(() {
+                              isRegisterMode = false;
+                              errorMsg = null;
+                            }),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: !isRegisterMode ? Colors.tealAccent.withOpacity(0.2) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(7),
+                                border: !isRegisterMode ? Border.all(color: Colors.tealAccent) : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                "Sign In",
+                                style: TextStyle(
+                                  color: !isRegisterMode ? Colors.tealAccent : Colors.white54,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: InkWell(
+                            onTap: () => setAuthState(() {
+                              isRegisterMode = true;
+                              errorMsg = null;
+                            }),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: isRegisterMode ? Colors.amberAccent.withOpacity(0.2) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(7),
+                                border: isRegisterMode ? Border.all(color: Colors.amberAccent) : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                "Create Account",
+                                style: TextStyle(
+                                  color: isRegisterMode ? Colors.amberAccent : Colors.white54,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                if (errorMsg != null)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(8),
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.redAccent),
+                    ),
+                    child: Text(
+                      errorMsg!,
+                      style: const TextStyle(color: Colors.redAccent, fontSize: 11.5, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+
+                TextField(
+                  controller: emailCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: InputDecoration(
+                    labelText: "Email Address",
+                    labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
+                    prefixIcon: const Icon(Icons.email_outlined, color: Colors.tealAccent, size: 18),
+                    filled: true,
+                    fillColor: const Color(0xFF121212),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: passCtrl,
+                  obscureText: obscurePass,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: InputDecoration(
+                    labelText: isResetMode ? "New Password (min 6 chars)" : "Password (Required)",
+                    labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
+                    prefixIcon: const Icon(Icons.lock_outline, color: Colors.tealAccent, size: 18),
+                    suffixIcon: IconButton(
+                      icon: Icon(obscurePass ? Icons.visibility_off : Icons.visibility, color: Colors.white54, size: 18),
+                      onPressed: () => setAuthState(() => obscurePass = !obscurePass),
+                    ),
+                    filled: true,
+                    fillColor: const Color(0xFF121212),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+                if (isRegisterMode) ...[
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: confirmPassCtrl,
+                    obscureText: obscurePass,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    decoration: InputDecoration(
+                      labelText: "Confirm Password",
+                      labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
+                      prefixIcon: const Icon(Icons.verified_user_outlined, color: Colors.amberAccent, size: 18),
+                      filled: true,
+                      fillColor: const Color(0xFF121212),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: pinCtrl,
+                    keyboardType: TextInputType.number,
+                    maxLength: 4,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    decoration: InputDecoration(
+                      labelText: "4-Digit Offline Recovery PIN (e.g. 1234)",
+                      counterText: "",
+                      labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
+                      prefixIcon: const Icon(Icons.pin_outlined, color: Colors.amberAccent, size: 18),
+                      filled: true,
+                      fillColor: const Color(0xFF121212),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ],
+                if (isResetMode) ...[
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: pinCtrl,
+                    keyboardType: TextInputType.number,
+                    maxLength: 4,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    decoration: InputDecoration(
+                      labelText: "Enter Your 4-Digit Recovery PIN",
+                      counterText: "",
+                      labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
+                      prefixIcon: const Icon(Icons.pin_outlined, color: Colors.amberAccent, size: 18),
+                      filled: true,
+                      fillColor: const Color(0xFF121212),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                  if (_firebaseApiKey.trim().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.amberAccent)),
+                        icon: const Icon(Icons.mark_email_read_outlined, color: Colors.amberAccent, size: 15),
+                        label: const Text("Send Firebase Reset Email Instead", style: TextStyle(color: Colors.amberAccent, fontSize: 11)),
+                        onPressed: () async {
+                          final String email = emailCtrl.text.trim().toLowerCase();
+                          if (!emailRegex.hasMatch(email)) {
+                            setAuthState(() => errorMsg = "❌ Enter your email address above first.");
+                            return;
+                          }
+                          final res = await _firebaseAuthPost("sendOobCode", {
+                            "requestType": "PASSWORD_RESET",
+                            "email": email,
+                          });
+                          if (res != null && res['error'] == null) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text("📧 Firebase password reset email sent to $email!")),
+                              );
+                            }
+                          } else {
+                            setAuthState(() => errorMsg = "❌ Could not send reset email. Check address or use 4-Digit PIN.");
+                          }
+                        },
+                      ),
+                    ),
+                ],
+                if (!isRegisterMode && !isResetMode)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => setAuthState(() {
+                        isResetMode = true;
+                        errorMsg = null;
+                      }),
+                      child: const Text("Forgot Password?", style: TextStyle(color: Colors.amberAccent, fontSize: 11)),
+                    ),
+                  ),
+                if (isResetMode)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => setAuthState(() {
+                        isResetMode = false;
+                        errorMsg = null;
+                      }),
+                      child: const Text("← Back to Sign In", style: TextStyle(color: Colors.tealAccent, fontSize: 11)),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            if (_signedInUserEmail != null)
+              TextButton(
+                onPressed: () async {
+                  setState(() {
+                    _signedInUserEmail = null;
+                    _firebaseUid = null;
+                    _firebaseIdToken = null;
+                    _userSubscriptionTier = "free";
+                    _dubbingMinutesRemaining = 0;
+                    _selectedDubExportResolution = "720p";
+                  });
+                  await _saveAccountState();
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text("🔒 Signed out. Returned to Free Guest Mode.")),
+                    );
+                  }
+                },
+                child: const Text("Sign Out", style: TextStyle(color: Colors.redAccent)),
+              ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Cancel", style: TextStyle(color: Colors.white54)),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isRegisterMode ? Colors.amberAccent : Colors.tealAccent,
+                foregroundColor: Colors.black,
+              ),
+              icon: Icon(
+                isBusy
+                    ? Icons.hourglass_top_rounded
+                    : (isRegisterMode ? Icons.person_add_alt_1_rounded : Icons.login_rounded),
+                size: 16,
+              ),
+              label: Text(
+                isBusy
+                    ? "Verifying..."
+                    : (isResetMode ? "Reset Password" : (isRegisterMode ? "Create Account" : "Sign In")),
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              onPressed: isBusy
+                  ? null
+                  : () async {
+                      final String email = emailCtrl.text.trim().toLowerCase();
+                      final String pass = passCtrl.text;
+
+                      if (!emailRegex.hasMatch(email)) {
+                        setAuthState(() => errorMsg = "❌ Please enter a valid email address (e.g. name@domain.com).");
+                        return;
+                      }
+                      if (pass.length < 6) {
+                        setAuthState(() => errorMsg = "❌ Password is required and must be at least 6 characters.");
+                        return;
+                      }
+
+                      setAuthState(() {
+                        isBusy = true;
+                        errorMsg = null;
+                      });
+
+                      // 1. PASSWORD RESET FLOW (PIN VERIFIED)
+                      if (isResetMode) {
+                        Map<String, dynamic>? acc = _accountsVault.containsKey(email)
+                            ? Map<String, dynamic>.from(_accountsVault[email])
+                            : await _firebaseFetchAccount(email);
+                        if (acc == null) {
+                          setAuthState(() {
+                            isBusy = false;
+                            errorMsg = "❌ No account found with this email.";
+                          });
+                          return;
+                        }
+                        if ((acc['pin'] ?? '') != pinCtrl.text.trim()) {
+                          setAuthState(() {
+                            isBusy = false;
+                            errorMsg = "❌ Invalid 4-Digit Recovery PIN.";
+                          });
+                          return;
+                        }
+                        acc['passwordHash'] = _hashPassword(email, pass);
+                        _accountsVault[email] = acc;
+                        await _saveAccountState();
+                        await _firebasePushAccount(email, acc);
+                        setAuthState(() {
+                          isBusy = false;
+                          isResetMode = false;
+                          errorMsg = null;
+                        });
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text("✅ Password updated! You can now sign in.")),
+                          );
+                        }
+                        return;
+                      }
+
+                      // 2. CREATE ACCOUNT (SIGN UP) FLOW
+                      if (isRegisterMode) {
+                        if (pass != confirmPassCtrl.text) {
+                          setAuthState(() {
+                            isBusy = false;
+                            errorMsg = "❌ Passwords do not match.";
+                          });
+                          return;
+                        }
+                        if (pinCtrl.text.trim().length != 4) {
+                          setAuthState(() {
+                            isBusy = false;
+                            errorMsg = "❌ Please enter a 4-digit Recovery PIN (e.g. 1234).";
+                          });
+                          return;
+                        }
+                        if (_accountsVault.containsKey(email)) {
+                          setAuthState(() {
+                            isBusy = false;
+                            errorMsg = "❌ Account already exists! Switch to the 'Sign In' tab.";
+                          });
+                          return;
+                        }
+
+                        // If Firebase Auth is configured, register on Firebase Cloud first
+                        if (_firebaseApiKey.trim().isNotEmpty) {
+                          final fbRes = await _firebaseAuthPost("signUp", {
+                            "email": email,
+                            "password": pass,
+                            "returnSecureToken": true,
+                          });
+                          if (fbRes != null && fbRes['error'] != null) {
+                            final String fbErr = (fbRes['error']['message'] ?? 'FIREBASE_ERROR').toString();
+                            setAuthState(() {
+                              isBusy = false;
+                              errorMsg = "❌ Firebase Auth: $fbErr";
+                            });
+                            return;
+                          }
+                          if (fbRes != null) {
+                            _firebaseUid = fbRes['localId']?.toString();
+                            _firebaseIdToken = fbRes['idToken']?.toString();
+                          }
+                        }
+
+                        final newRecord = {
+                          'email': email,
+                          'passwordHash': _hashPassword(email, pass),
+                          'pin': pinCtrl.text.trim(),
+                          'tier': 'free',
+                          'mins': 0,
+                          'createdAt': DateTime.now().toIso8601String(),
+                        };
+                        _accountsVault[email] = newRecord;
+                        setState(() {
+                          _signedInUserEmail = email;
+                          _userSubscriptionTier = 'free';
+                          _dubbingMinutesRemaining = 0;
+                          _selectedDubExportResolution = '720p';
+                        });
+                        await _saveAccountState();
+                        signedIn = true;
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text("🎉 Account created & signed in as $email")),
+                          );
+                        }
+                        return;
+                      }
+
+                      // 3. STRICT SIGN-IN FLOW (FIREBASE CLOUD + LOCAL VAULT)
+                      Map<String, dynamic>? acc;
+                      if (_firebaseApiKey.trim().isNotEmpty) {
+                        final fbRes = await _firebaseAuthPost("signInWithPassword", {
+                          "email": email,
+                          "password": pass,
+                          "returnSecureToken": true,
+                        });
+                        if (fbRes != null && fbRes['error'] != null) {
+                          setAuthState(() {
+                            isBusy = false;
+                            errorMsg = "❌ Invalid email or password (Firebase Auth).";
+                          });
+                          return;
+                        }
+                        if (fbRes != null && fbRes['localId'] != null) {
+                          _firebaseUid = fbRes['localId'].toString();
+                          _firebaseIdToken = fbRes['idToken']?.toString();
+                          acc = await _firebaseFetchAccount(email, uid: _firebaseUid, idToken: _firebaseIdToken);
+                          acc ??= {
+                            'email': email,
+                            'passwordHash': _hashPassword(email, pass),
+                            'pin': '0000',
+                            'tier': 'free',
+                            'mins': 0,
+                          };
+                          _accountsVault[email] = acc;
+                        }
+                      }
+
+                      // Offline / Local Vault Verification
+                      if (acc == null) {
+                        if (!_accountsVault.containsKey(email)) {
+                          // Check if account exists in Firebase DB by email hash
+                          final cloudByEmail = await _firebaseFetchAccount(email);
+                          if (cloudByEmail != null) {
+                            acc = cloudByEmail;
+                            _accountsVault[email] = acc;
+                          } else {
+                            setAuthState(() {
+                              isBusy = false;
+                              errorMsg = "❌ Account not found! Tap 'Create Account' first to register.";
+                            });
+                            return;
+                          }
+                        } else {
+                          acc = Map<String, dynamic>.from(_accountsVault[email]);
+                        }
+
+                        final String expectedHash = acc['passwordHash'] ?? '';
+                        if (_hashPassword(email, pass) != expectedHash) {
+                          setAuthState(() {
+                            isBusy = false;
+                            errorMsg = "❌ Incorrect password for $email.";
+                          });
+                          return;
+                        }
+                      }
+
+                      setState(() {
+                        _signedInUserEmail = email;
+                        _userSubscriptionTier = acc!['tier'] ?? 'free';
+                        _dubbingMinutesRemaining = acc['mins'] ?? 0;
+                        _selectedDubExportResolution = _userSubscriptionTier == 'pro_20'
+                            ? '4K'
+                            : (_userSubscriptionTier == 'creator_8' ? '1080p' : '720p');
+                      });
+                      await _saveAccountState();
+                      signedIn = true;
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text("✅ Authenticated & signed in as $email")),
+                        );
+                      }
+                    },
+            ),
+          ],
+        ),
       ),
     );
     return signedIn;

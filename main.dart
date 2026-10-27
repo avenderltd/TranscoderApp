@@ -7446,7 +7446,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   }
 
   String _emailKey(String email) =>
-      email.trim().toLowerCase().replaceAll('.', ',').replaceAll('#', '_').replaceAll('$', '_').replaceAll('[', '_').replaceAll(']', '_').replaceAll('/', '_');
+      email.trim().toLowerCase().replaceAll('.', ',').replaceAll('#', '_').replaceAll('\$', '_').replaceAll('[', '_').replaceAll(']', '_').replaceAll('/', '_');
 
   Future<Map<String, dynamic>?> _firebaseAuthPost(String action, Map<String, dynamic> payload) async {
     if (_firebaseApiKey.trim().isEmpty) return null;

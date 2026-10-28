@@ -14,7 +14,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-
+      
       - name: Create Base Flutter App & Inject Code
         run: |
           flutter create app
@@ -23,15 +23,15 @@ jobs:
           cp AndroidManifest.xml app/android/app/src/main/AndroidManifest.xml
           sed -i 's/flutter.minSdkVersion/28/g' app/android/app/build.gradle.kts
           sed -i 's/flutter.compileSdkVersion/37/g' app/android/app/build.gradle.kts
-
+          
       - name: Build APK
         run: |
           yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
           cd app
           flutter pub get
-          find /home/runner/.pub-cache/ -name "build.gradle*" -exec sed -i 's/configurations\.all/configurations.configureEach/g; s/compileSdkVersion [0-9][0-9]/compileSdkVersion 37/g; s/compileSdk [0-9][0-9]/compileSdk 37/g; s/compileSdk = [0-9][0-9]/compileSdk = 37/g' {} +
+          find /home/runner/.pub-cache/ -name "build.gradle*" -exec sed -i 's/compileSdkVersion [0-9][0-9]/compileSdkVersion 37/g; s/compileSdk [0-9][0-9]/compileSdk 37/g; s/compileSdk = [0-9][0-9]/compileSdk = 37/g' {} +
           flutter build apk --release --split-per-abi
-
+          
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:

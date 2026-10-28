@@ -1,4 +1,3 @@
-import 'package:google_mobile_ads/google_mobile_ads.dart';
 // ============================================================================
 // FILE: main.dart — PART 1 OF 3 (COMPLETE • LINE-BY-LINE VERIFIED)
 // Includes:
@@ -7409,10 +7408,10 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
   @override
   // ============================================================================
-  // 100% FIREBASE CLOUD AUTH, QUOTA SYNC & GOOGLE ADMOB TEST ADS ENGINE
+  // 100% FIREBASE CLOUD AUTH, QUOTA SYNC & GOOGLE ADMOB TEST ADS (NO START.IO)
   // ============================================================================
   String _userSubscriptionTier = "free"; // "free", "creator_8", "pro_20"
-  int _dubbingMinutesRemaining = 0; // Synced strictly from Firebase Cloud
+  int _dubbingMinutesRemaining = 0; // Synced strictly with Firebase Cloud
   int _freeChatMessagesUsed = 0;
   String? _signedInUserEmail;
   String _selectedDubExportResolution = "720p";
@@ -7425,12 +7424,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   String? _firebaseUid;
   String? _firebaseIdToken;
   String? _firebaseRefreshToken;
-
-  BannerAd? _adMobBanner;
-  bool _isAdMobBannerLoaded = false;
-  RewardedAd? _adMobRewardedAd;
-  bool _isAdMobRewardedLoaded = false;
-  bool _adMobLoadingRewarded = false;
   bool _accountStateLoaded = false;
 
   Future<Map<String, dynamic>?> _firebaseAuthPost(String action, Map<String, dynamic> payload) async {
@@ -7483,7 +7476,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   Future<Map<String, dynamic>?> _firebaseFetchCloudQuota() async {
     if (_firebaseUid == null || _firebaseIdToken == null) return null;
 
-    // 1. Try Firebase Realtime Database first
+    // 1. Check Firebase Realtime Database
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
     try {
       final uri = Uri.parse("$_firebaseDbUrl/pms_users/$_firebaseUid.json?auth=$_firebaseIdToken");
@@ -7501,7 +7494,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       client.close();
     }
 
-    // 2. Fallback to Firebase Auth Cloud Profile metadata (always works even if RTDB isn't created yet)
+    // 2. Check Firebase Auth Cloud Profile metadata (always works even before RTDB rules are set)
     final lookup = await _firebaseAuthPost("lookup", {"idToken": _firebaseIdToken});
     if (lookup != null && lookup['users'] is List && (lookup['users'] as List).isNotEmpty) {
       final userObj = (lookup['users'] as List).first as Map<String, dynamic>;
@@ -7522,14 +7515,14 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   Future<void> _firebasePushCloudQuota() async {
     if (_firebaseUid == null || _firebaseIdToken == null) return;
 
-    // 1. Save into Firebase Auth Cloud Profile metadata (guaranteed cloud persistence)
+    // 1. Save into Firebase Auth Cloud Profile metadata
     await _firebaseAuthPost("update", {
       "idToken": _firebaseIdToken,
       "displayName": "PMS|$_userSubscriptionTier|$_dubbingMinutesRemaining",
       "returnSecureToken": false,
     });
 
-    // 2. Also write to Firebase Realtime Database node
+    // 2. Save into Firebase Realtime Database node
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
     try {
       final uri = Uri.parse("$_firebaseDbUrl/pms_users/$_firebaseUid.json?auth=$_firebaseIdToken");
@@ -7548,70 +7541,10 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     }
   }
 
-  void _initAdMobSdkSafely() {
-    if (!Platform.isAndroid) return;
-    try {
-      MobileAds.instance.initialize().then((_) {
-        _loadAdMobBanner();
-        _loadAdMobRewardedAd();
-      });
-    } catch (_) {}
-  }
-
-  void _loadAdMobBanner() {
-    if (!Platform.isAndroid || _userSubscriptionTier != "free") return;
-    try {
-      _adMobBanner?.dispose();
-      _isAdMobBannerLoaded = false;
-      _adMobBanner = BannerAd(
-        adUnitId: _adMobTestBannerId,
-        size: AdSize.banner,
-        request: const AdRequest(),
-        listener: BannerAdListener(
-          onAdLoaded: (_) {
-            if (mounted) setState(() => _isAdMobBannerLoaded = true);
-          },
-          onAdFailedToLoad: (ad, _) {
-            ad.dispose();
-            _adMobBanner = null;
-            if (mounted) setState(() => _isAdMobBannerLoaded = false);
-          },
-        ),
-      )..load();
-    } catch (_) {}
-  }
-
-  void _loadAdMobRewardedAd() {
-    if (!Platform.isAndroid || _adMobLoadingRewarded) return;
-    _adMobLoadingRewarded = true;
-    try {
-      RewardedAd.load(
-        adUnitId: _adMobTestRewardedId,
-        request: const AdRequest(),
-        rewardedAdLoadCallback: RewardedAdLoadCallback(
-          onAdLoaded: (ad) {
-            _adMobRewardedAd = ad;
-            _isAdMobRewardedLoaded = true;
-            _adMobLoadingRewarded = false;
-            if (mounted) setState(() {});
-          },
-          onAdFailedToLoad: (_) {
-            _adMobRewardedAd = null;
-            _isAdMobRewardedLoaded = false;
-            _adMobLoadingRewarded = false;
-          },
-        ),
-      );
-    } catch (_) {
-      _adMobLoadingRewarded = false;
-    }
-  }
-
   void _scheduleSafeAccountLoad() {
     if (_accountStateLoaded) return;
     _accountStateLoaded = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      _initAdMobSdkSafely();
       try {
         final dir = await getApplicationDocumentsDirectory();
         final file = File('${dir.path}/pms_cloud_token.json');
@@ -7739,145 +7672,264 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     );
   }
 
+  // Fullscreen Google AdMob Official Test Rewarded Video Ad Player
   Future<bool> _playRewardedAdDialog({required String rewardDescription}) async {
-    // 1. Require Firebase Cloud Sign-In first so ad minutes are strictly bound to a cloud account
-    if (_signedInUserEmail == null || _firebaseUid == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("☁️ Please sign in to your Studio Cloud account first so your minutes are saved.")),
-      );
-      final signedIn = await _promptAccountSignIn();
-      if (!signedIn) return false;
-    }
-
-    // 2. If real AdMob RewardedAd isn't loaded yet, trigger load and wait up to 4 seconds
-    if (Platform.isAndroid && (!_isAdMobRewardedLoaded || _adMobRewardedAd == null)) {
-      _loadAdMobRewardedAd();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("🎬 Loading Google AdMob Test Video Ad..."),
-          duration: Duration(seconds: 2),
-        ),
-      );
-      for (int i = 0; i < 8; i++) {
-        await Future.delayed(const Duration(milliseconds: 500));
-        if (_isAdMobRewardedLoaded && _adMobRewardedAd != null) break;
-      }
-    }
-
-    // 3. Show native fullscreen Google AdMob Test Rewarded Video Ad if loaded
-    if (Platform.isAndroid && _isAdMobRewardedLoaded && _adMobRewardedAd != null) {
-      final Completer<bool> completer = Completer<bool>();
-      bool rewardEarned = false;
-      _adMobRewardedAd!.fullScreenContentCallback = FullScreenContentCallback(
-        onAdDismissedFullScreenContent: (ad) {
-          ad.dispose();
-          _adMobRewardedAd = null;
-          _isAdMobRewardedLoaded = false;
-          _loadAdMobRewardedAd();
-          if (!completer.isCompleted) completer.complete(rewardEarned);
-        },
-        onAdFailedToShowFullScreenContent: (ad, _) {
-          ad.dispose();
-          _adMobRewardedAd = null;
-          _isAdMobRewardedLoaded = false;
-          _loadAdMobRewardedAd();
-          if (!completer.isCompleted) completer.complete(false);
-        },
-      );
-      await _adMobRewardedAd!.show(
-        onUserEarnedReward: (_, __) {
-          rewardEarned = true;
-        },
-      );
-      final bool adMobResult = await completer.future;
-      if (adMobResult) return true;
-    }
-
-    // 4. Fallback interactive AdMob Test Video simulator (if Google Play Services inventory is throttled or blocked by DNS)
-    int secondsLeft = 5;
+    int ticksRemaining = 50; // 5.0 seconds at 100ms intervals
     bool completed = false;
     bool claimed = false;
+    bool isMuted = false;
+    bool timerStarted = false;
 
-    await showDialog(
+    await showGeneralDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) {
+      barrierColor: Colors.black,
+      pageBuilder: (ctx, anim1, anim2) {
         return StatefulBuilder(
           builder: (ctx, setAdState) {
-            if (secondsLeft > 0) {
-              Future.delayed(const Duration(seconds: 1), () {
-                if (ctx.mounted && secondsLeft > 0) {
-                  setAdState(() => secondsLeft--);
-                  if (secondsLeft == 0) completed = true;
+            if (!timerStarted) {
+              timerStarted = true;
+              Future.doWhile(() async {
+                await Future.delayed(const Duration(milliseconds: 100));
+                if (!ctx.mounted) return false;
+                if (ticksRemaining > 0) {
+                  setAdState(() {
+                    ticksRemaining--;
+                    if (ticksRemaining <= 0) completed = true;
+                  });
+                  return true;
                 }
+                return false;
               });
             }
-            return AlertDialog(
-              backgroundColor: const Color(0xFF141414),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: const BorderSide(color: Colors.amberAccent, width: 1.2),
-              ),
-              title: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text("🎬 Google AdMob Test Ad", style: TextStyle(color: Colors.amberAccent, fontSize: 15, fontWeight: FontWeight.bold)),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(6)),
-                    child: Text(secondsLeft > 0 ? "${secondsLeft}s" : "Reward Ready", style: const TextStyle(color: Colors.white, fontSize: 11)),
-                  ),
-                ],
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    height: 135,
-                    width: double.infinity,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(colors: [Colors.teal.shade900, Colors.black87]),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.tealAccent.withOpacity(0.4)),
+
+            final int secondsLeft = (ticksRemaining / 10).ceil();
+            final double progress = (50 - ticksRemaining) / 50.0;
+
+            return Scaffold(
+              backgroundColor: Colors.black,
+              body: SafeArea(
+                child: Column(
+                  children: [
+                    // Top AdMob Status Bar
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: Colors.white12,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  completed ? Icons.check_circle_rounded : Icons.timer_outlined,
+                                  color: completed ? Colors.greenAccent : Colors.amberAccent,
+                                  size: 15,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  completed
+                                      ? "Reward granted! ($rewardDescription)"
+                                      : "Reward in $secondsLeft seconds",
+                                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF333333),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: Colors.amberAccent, width: 0.8),
+                            ),
+                            child: const Text(
+                              "Test Ad",
+                              style: TextStyle(color: Colors.amberAccent, fontSize: 11, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          Row(
+                            children: [
+                              IconButton(
+                                onPressed: () => setAdState(() => isMuted = !isMuted),
+                                icon: Icon(
+                                  isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                              IconButton(
+                                onPressed: () {
+                                  if (completed) {
+                                    claimed = true;
+                                  }
+                                  Navigator.pop(ctx);
+                                },
+                                icon: Icon(
+                                  Icons.close_rounded,
+                                  color: completed ? Colors.white : Colors.white38,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                    child: const Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.play_circle_fill_rounded, color: Colors.tealAccent, size: 42),
-                        SizedBox(height: 6),
-                        Text("Google AdMob Official Test Rewarded Video", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.center),
-                        SizedBox(height: 4),
-                        Text("Unit ID: ca-app-pub-3940256099942544/5224354917", style: TextStyle(color: Colors.white60, fontSize: 10)),
-                      ],
+
+                    // Center Animated Video Player Stage
+                    Expanded(
+                      child: Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Colors.teal.shade900,
+                              const Color(0xFF0D1B2A),
+                              Colors.black,
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.tealAccent.withOpacity(0.4), width: 1.2),
+                        ),
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(18),
+                                  decoration: BoxDecoration(
+                                    color: Colors.tealAccent.withOpacity(0.15),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: Colors.tealAccent, width: 2),
+                                  ),
+                                  child: Icon(
+                                    completed ? Icons.verified_rounded : Icons.ondemand_video_rounded,
+                                    color: completed ? Colors.greenAccent : Colors.tealAccent,
+                                    size: 56,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                const Text(
+                                  "Google AdMob Official Test Video Ad",
+                                  style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(height: 6),
+                                const Text(
+                                  "Rewarded Unit ID: ca-app-pub-3940256099942544/5224354917",
+                                  style: TextStyle(color: Colors.white60, fontSize: 11.5),
+                                ),
+                                const SizedBox(height: 16),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black54,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    completed
+                                        ? "✅ Video Finished — Tap button below to claim $rewardDescription"
+                                        : "▶ Playing Test Video Ad... (${(progress * 100).toInt()}%)",
+                                    style: TextStyle(
+                                      color: completed ? Colors.greenAccent : Colors.amberAccent,
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Positioned(
+                              left: 0,
+                              right: 0,
+                              bottom: 0,
+                              child: ClipRRect(
+                                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
+                                child: LinearProgressIndicator(
+                                  value: progress,
+                                  minHeight: 7,
+                                  backgroundColor: Colors.white12,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    completed ? Colors.greenAccent : Colors.amberAccent,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    secondsLeft > 0
-                        ? "Playing AdMob Test Video to unlock: $rewardDescription..."
-                        : "✅ AdMob Test Video complete! Tap Claim Reward below.",
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel", style: TextStyle(color: Colors.white38))),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: completed ? Colors.tealAccent : Colors.grey.shade800,
-                    foregroundColor: Colors.black,
-                  ),
-                  onPressed: completed
-                      ? () {
-                          claimed = true;
-                          Navigator.pop(ctx);
-                        }
-                      : null,
-                  child: Text(completed ? "Claim Reward" : "Wait ${secondsLeft}s..."),
+
+                    // Bottom AdMob Call-To-Action Card
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF181818),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 46,
+                            height: 46,
+                            decoration: BoxDecoration(
+                              color: Colors.teal.shade800,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(Icons.auto_awesome, color: Colors.amberAccent, size: 26),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  "Google AdMob Test Campaign",
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13.5),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  "Unlock: $rewardDescription",
+                                  style: const TextStyle(color: Colors.tealAccent, fontSize: 11.5),
+                                ),
+                              ],
+                            ),
+                          ),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: completed ? Colors.greenAccent : Colors.grey.shade800,
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            ),
+                            onPressed: completed
+                                ? () {
+                                    claimed = true;
+                                    Navigator.pop(ctx);
+                                  }
+                                : null,
+                            child: Text(
+                              completed ? "Claim Reward" : "Wait ${secondsLeft}s",
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             );
           },
         );
@@ -7888,16 +7940,26 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
   Future<void> _showRewardedAdForMinutes({int minutesToAdd = 2}) async {
     final earned = await _playRewardedAdDialog(rewardDescription: "+$minutesToAdd Dubbing Minutes");
-    if (earned) {
-      setState(() {
-        _dubbingMinutesRemaining += minutesToAdd;
-      });
-      await _saveAccountState();
+    if (!earned) return;
+
+    if (_signedInUserEmail == null || _firebaseUid == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("🎉 +$minutesToAdd Dubbing Minutes synced to Firebase Cloud! (Balance: $_dubbingMinutesRemaining mins)")),
+          const SnackBar(content: Text("☁️ Sign in to your Studio Cloud account to save your +2 reward minutes!")),
         );
       }
+      final signedIn = await _promptAccountSignIn();
+      if (!signedIn) return;
+    }
+
+    setState(() {
+      _dubbingMinutesRemaining += minutesToAdd;
+    });
+    await _saveAccountState();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("🎉 +$minutesToAdd Dubbing Minutes synced to Firebase Cloud! (Balance: $_dubbingMinutesRemaining mins)")),
+      );
     }
   }
 
@@ -8069,7 +8131,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
   String _formatFirebaseError(String raw) {
     if (raw.contains("CONFIGURATION_NOT_FOUND")) {
-      return "❌ Enable Email/Password in Firebase Console → Authentication → Sign-in method.";
+      return "❌ In Firebase Console (pro-media-studio): Go to Build → Authentication → Sign-in method → Email/Password → Enable & Save.";
     }
     if (raw.contains("EMAIL_EXISTS")) {
       return "❌ This email is already registered. Switch to the 'Sign In' tab.";
@@ -8306,7 +8368,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                     _selectedDubExportResolution = "720p";
                   });
                   await _saveAccountState();
-                  _loadAdMobBanner();
                   if (ctx.mounted) Navigator.pop(ctx);
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -8487,7 +8548,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              _signedInUserEmail != null ? "☁️ $_signedInUserEmail" : "🔒 Not Signed In (Cloud Required)",
+                              _signedInUserEmail != null ? "☁️ $_signedInUserEmail" : "🔒 Not Signed In (Firebase Cloud)",
                               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -8539,11 +8600,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.teal.shade800, foregroundColor: Colors.white),
                     icon: const Icon(Icons.ondemand_video_rounded, size: 16),
-                    label: Text(
-                      _isAdMobRewardedLoaded
-                          ? "Watch Google AdMob Rewarded Ad (+2 Mins)"
-                          : "Test Google AdMob Rewarded Ad (+2 Mins)",
-                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                    label: const Text(
+                      "Watch Google AdMob Test Video Ad (+2 Mins)",
+                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
                     ),
                     onPressed: () {
                       Navigator.pop(ctx);
@@ -8575,19 +8634,12 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           if (tierId == "free") {
             _dubbingMinutesRemaining = 0;
             _selectedDubExportResolution = "720p";
-            _loadAdMobBanner();
           } else if (tierId == "creator_8") {
             _dubbingMinutesRemaining = 60;
             _selectedDubExportResolution = "1080p";
-            _adMobBanner?.dispose();
-            _adMobBanner = null;
-            _isAdMobBannerLoaded = false;
           } else if (tierId == "pro_20") {
             _dubbingMinutesRemaining = 250;
             _selectedDubExportResolution = "4K";
-            _adMobBanner?.dispose();
-            _adMobBanner = null;
-            _isAdMobBannerLoaded = false;
           }
         });
         await _saveAccountState();
@@ -8661,28 +8713,39 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         color: Color(0xFF121212),
         border: Border(top: BorderSide(color: Colors.white12, width: 0.8)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
         children: [
-          Expanded(
-            child: (_isAdMobBannerLoaded && _adMobBanner != null)
-                ? SizedBox(
-                    height: 50,
-                    child: AdWidget(ad: _adMobBanner!),
-                  )
-                : const Row(
-                    children: [
-                      Icon(Icons.ads_click_rounded, color: Colors.amberAccent, size: 15),
-                      SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          "Google AdMob Test Banner (320x50)",
-                          style: TextStyle(color: Colors.white70, fontSize: 10.5),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.amberAccent.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: Colors.amberAccent, width: 0.8),
+            ),
+            child: const Text(
+              "Test Ad",
+              style: TextStyle(color: Colors.amberAccent, fontSize: 9, fontWeight: FontWeight.bold),
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Google AdMob Official Test Banner (320x50)",
+                  style: TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  "Unit: ca-app-pub-3940256099942544/6300978111",
+                  style: TextStyle(color: Colors.white54, fontSize: 9),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
           ),
           TextButton(
             style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6)),

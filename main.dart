@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 // ============================================================================
 // FILE: main.dart — PART 1 OF 3 (COMPLETE • LINE-BY-LINE VERIFIED)
 // Includes:
@@ -7420,6 +7421,234 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   static const String _firebaseDbUrl = "https://pro-media-studio-default-rtdb.europe-west1.firebasedatabase.app";
   static const String _adMobTestBannerId = "ca-app-pub-3940256099942544/6300978111";
   static const String _adMobTestRewardedId = "ca-app-pub-3940256099942544/5224354917";
+  static const MethodChannel _emailChannel = MethodChannel('pro_media_studio/email');
+  static const String _companySalesEmail = "info@avenderltd.com";
+
+  Future<void> _launchCompanySalesEmail({
+    required String packageTitle,
+    required String minutesAmount,
+    required String priceEur,
+  }) async {
+    final String userEmail = _signedInUserEmail ?? "Not Signed In (Please enter your account email)";
+    final String userUid = _firebaseUid ?? "N/A";
+    final String subject = "Order Request: $packageTitle ($minutesAmount - $priceEur)";
+    final String body =
+        "Hello Avender Ltd Sales Team,\n\n"
+        "I would like to purchase the following Cloud Dubbing & Subtitle Quota package:\n\n"
+        "• Selected Package: $packageTitle\n"
+        "• Quota Volume: $minutesAmount\n"
+        "• Listed Price: $priceEur\n"
+        "• My Studio Cloud Email: $userEmail\n"
+        "• My Cloud Account ID: $userUid\n\n"
+        "Please send me the payment link / invoice so I can receive my Single-Use Cloud Activation Key.\n\n"
+        "Thank you!";
+
+    bool opened = false;
+    if (Platform.isAndroid) {
+      try {
+        final bool? res = await _emailChannel.invokeMethod<bool>('openEmail', {
+          'to': _companySalesEmail,
+          'subject': subject,
+          'body': body,
+        });
+        opened = (res == true);
+      } catch (_) {}
+    }
+
+    // Always copy the email & order details to clipboard as a backup
+    await Clipboard.setData(ClipboardData(
+      text: "To: $_companySalesEmail\nSubject: $subject\n\n$body",
+    ));
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            opened
+                ? "📧 Opening email app to $_companySalesEmail (Order details also copied!)"
+                : "📋 Copied $_companySalesEmail & order details to clipboard! Paste in your email app.",
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
+  void _showCustomLicensePricingDialog() {
+    final List<Map<String, String>> packages = [
+      {
+        "title": "⚡ Creator Boost Pack",
+        "mins": "+100 Dubbing Minutes",
+        "price": "€12",
+        "rate": "€0.12 / min • Instant Single-Use Cloud Key",
+      },
+      {
+        "title": "🚀 Pro Studio Refill",
+        "mins": "+300 Dubbing Minutes",
+        "price": "€25",
+        "rate": "€0.08 / min • Unlocks Pro Studio 4K + All 37 AI Models",
+      },
+      {
+        "title": "🏢 Agency Volume License",
+        "mins": "+1,000 Dubbing Minutes",
+        "price": "€75",
+        "rate": "€0.075 / min • Priority Commercial Studio Key",
+      },
+      {
+        "title": "👑 Enterprise Studio Pack",
+        "mins": "+3,000 Dubbing Minutes",
+        "price": "€199",
+        "rate": "€0.066 / min • Full Production Volume + Priority Support",
+      },
+      {
+        "title": "🎯 Custom Pay-As-You-Go",
+        "mins": "Custom Minute Volume",
+        "price": "€1.00 / min (Small orders <50m)",
+        "rate": "Standard rate for custom single-project orders",
+      },
+    ];
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF161616),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: Colors.amberAccent, width: 1.2),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.price_check_rounded, color: Colors.amberAccent, size: 22),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                "Official Minute Packages & Direct Sales",
+                style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(9),
+                decoration: BoxDecoration(
+                  color: Colors.teal.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.tealAccent.withOpacity(0.5)),
+                ),
+                child: const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "📧 Official Sales Email: info@avenderltd.com",
+                      style: TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      "Select a package below to email Avender Ltd directly with your pre-filled order. Upon payment, you receive a Single-Use Cloud Activation Key to redeem in the app.",
+                      style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              ...packages.map((pkg) => Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF101010),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                pkg["title"]!,
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12.5),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.amberAccent.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: Colors.amberAccent),
+                              ),
+                              child: Text(
+                                pkg["price"]!,
+                                style: const TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 11.5),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          "${pkg['mins']} • ${pkg['rate']}",
+                          style: const TextStyle(color: Colors.tealAccent, fontSize: 11),
+                        ),
+                        const SizedBox(height: 7),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.tealAccent,
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(vertical: 7),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            icon: const Icon(Icons.mail_outline_rounded, size: 15),
+                            label: Text(
+                              "Order via info@avenderltd.com (${pkg['price']})",
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                            ),
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _launchCompanySalesEmail(
+                                packageTitle: pkg["title"]!,
+                                minutesAmount: pkg["mins"]!,
+                                priceEur: pkg["price"]!,
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  )),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(const ClipboardData(text: "info@avenderltd.com"));
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("📋 Copied info@avenderltd.com to clipboard!")),
+                );
+              }
+            },
+            icon: const Icon(Icons.copy_rounded, color: Colors.amberAccent, size: 15),
+            label: const Text("Copy Email", style: TextStyle(color: Colors.amberAccent, fontSize: 11.5)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Close", style: TextStyle(color: Colors.white54)),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   String? _firebaseUid;
   String? _firebaseIdToken;
@@ -8118,6 +8347,19 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                     },
                   ),
                 ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.amberAccent)),
+                    icon: const Icon(Icons.mail_lock_rounded, color: Colors.amberAccent, size: 18),
+                    label: const Text("Minute Pricing & Direct Order (info@avenderltd.com)", style: TextStyle(color: Colors.amberAccent, fontSize: 11.5)),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _showCustomLicensePricingDialog();
+                    },
+                  ),
+                ),
               ],
             ),
           ),
@@ -8610,6 +8852,22 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                     },
                   ),
                 ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.amberAccent)),
+                    icon: const Icon(Icons.business_center_rounded, color: Colors.amberAccent, size: 16),
+                    label: const Text(
+                      "Bulk Minute Pricing & Direct Order (info@avenderltd.com)",
+                      style: TextStyle(color: Colors.amberAccent, fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _showCustomLicensePricingDialog();
+                    },
+                  ),
+                ),
               ],
             ),
           ),
@@ -8833,6 +9091,22 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                 ),
                 const SizedBox(height: 14),
                 const Divider(color: Colors.white24, height: 1),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.tealAccent)),
+                    icon: const Icon(Icons.price_change_outlined, color: Colors.tealAccent, size: 16),
+                    label: const Text(
+                      "View Minute Pricing & Buy Key (info@avenderltd.com)",
+                      style: TextStyle(color: Colors.tealAccent, fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _showCustomLicensePricingDialog();
+                    },
+                  ),
+                ),
                 const SizedBox(height: 12),
                 const Text(
                   "🔑 Have a Cloud License / Activation Code?",

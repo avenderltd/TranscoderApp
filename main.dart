@@ -1,3 +1,4 @@
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 // ============================================================================
 // FILE: main.dart — PART 1 OF 3 (COMPLETE • LINE-BY-LINE VERIFIED)
 // Includes:
@@ -7408,55 +7409,40 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
   @override
   // ============================================================================
-  // 3-TIER SUBSCRIPTION, ACCOUNT SIGN-IN & ADMOB / START.IO (209515884) ENGINE
+  // 100% FIREBASE CLOUD AUTH, QUOTA SYNC & GOOGLE ADMOB TEST ADS ENGINE
   // ============================================================================
   String _userSubscriptionTier = "free"; // "free", "creator_8", "pro_20"
-  int _dubbingMinutesRemaining = 0; // Free starts at 0m (watch ads); €8 = 60m; €20 = 250m
+  int _dubbingMinutesRemaining = 0; // Synced strictly from Firebase Cloud
   int _freeChatMessagesUsed = 0;
   String? _signedInUserEmail;
-  String _activeAdProvider = "both"; // "both", "admob", "startio"
   String _selectedDubExportResolution = "720p";
-  static const String _startIoAppId = "209515884";
+
+  static const String _firebaseApiKey = "AIzaSyCeXJu7FeJMnZt71lSmvW8Yq4Ycd3nh0v0";
+  static const String _firebaseDbUrl = "https://pro-media-studio-default-rtdb.firebaseio.com";
   static const String _adMobTestBannerId = "ca-app-pub-3940256099942544/6300978111";
   static const String _adMobTestRewardedId = "ca-app-pub-3940256099942544/5224354917";
-  bool _accountStateLoaded = false;
 
-  Map<String, dynamic> _accountsVault = {};
-  // Optional: Paste your Firebase Web API Key & Realtime DB URL here (or set via the ☁️ icon in the Sign-In dialog)
-  String _firebaseApiKey = "";
-  String _firebaseDbUrl = "";
   String? _firebaseUid;
   String? _firebaseIdToken;
+  String? _firebaseRefreshToken;
 
-  bool get _isFirebaseConfigured =>
-      _firebaseApiKey.trim().isNotEmpty && _firebaseDbUrl.trim().isNotEmpty;
-
-  String _hashPassword(String email, String password) {
-    final String salted = "${email.trim().toLowerCase()}::pms_salt_2026::$password";
-    int hash1 = 0x811c9dc5;
-    int hash2 = 0x1000193;
-    for (int i = 0; i < salted.length; i++) {
-      final int c = salted.codeUnitAt(i);
-      hash1 ^= c;
-      hash1 = (hash1 * 0x01000193) & 0x7fffffff;
-      hash2 ^= (c * (i + 1));
-      hash2 = (hash2 * 0x85ebca6b) & 0x7fffffff;
-    }
-    return "${hash1.toRadixString(16).padLeft(8, '0')}${hash2.toRadixString(16).padLeft(8, '0')}";
-  }
-
-  String _emailKey(String email) =>
-      email.trim().toLowerCase().replaceAll('.', ',').replaceAll('#', '_').replaceAll('\$', '_').replaceAll('[', '_').replaceAll(']', '_').replaceAll('/', '_');
+  BannerAd? _adMobBanner;
+  bool _isAdMobBannerLoaded = false;
+  RewardedAd? _adMobRewardedAd;
+  bool _isAdMobRewardedLoaded = false;
+  bool _adMobLoadingRewarded = false;
+  bool _accountStateLoaded = false;
 
   Future<Map<String, dynamic>?> _firebaseAuthPost(String action, Map<String, dynamic> payload) async {
-    if (_firebaseApiKey.trim().isEmpty) return null;
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
     try {
-      final uri = Uri.parse("https://identitytoolkit.googleapis.com/v1/accounts:$action?key=${_firebaseApiKey.trim()}");
+      final uri = Uri.parse(
+        "https://identitytoolkit.googleapis.com/v1/accounts:$action?key=$_firebaseApiKey",
+      );
       final req = await client.postUrl(uri);
       req.headers.set(HttpHeaders.contentTypeHeader, "application/json; charset=utf-8");
       req.add(utf8.encode(jsonEncode(payload)));
-      final res = await req.close().timeout(const Duration(seconds: 10));
+      final res = await req.close().timeout(const Duration(seconds: 12));
       final body = await res.transform(utf8.decoder).join();
       return jsonDecode(body) as Map<String, dynamic>;
     } catch (_) {
@@ -7466,39 +7452,95 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     }
   }
 
-  Future<Map<String, dynamic>?> _firebaseFetchAccount(String email, {String? uid, String? idToken}) async {
-    if (!_isFirebaseConfigured) return null;
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+  Future<bool> _refreshFirebaseTokenIfNeeded() async {
+    if (_firebaseRefreshToken == null || _firebaseRefreshToken!.isEmpty) return false;
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
     try {
-      final String base = _firebaseDbUrl.trim().replaceAll(RegExp(r'/$'), '');
-      final String node = (uid != null && uid.isNotEmpty) ? uid : _emailKey(email);
-      final String authParam = (idToken != null && idToken.isNotEmpty) ? "?auth=$idToken" : "";
-      final uri = Uri.parse("$base/pms_users/$node.json$authParam");
-      final req = await client.getUrl(uri);
-      final res = await req.close().timeout(const Duration(seconds: 8));
-      if (res.statusCode != 200) return null;
+      final uri = Uri.parse(
+        "https://securetoken.googleapis.com/v1/token?key=$_firebaseApiKey",
+      );
+      final req = await client.postUrl(uri);
+      req.headers.set(HttpHeaders.contentTypeHeader, "application/json; charset=utf-8");
+      req.add(utf8.encode(jsonEncode({
+        "grant_type": "refresh_token",
+        "refresh_token": _firebaseRefreshToken,
+      })));
+      final res = await req.close().timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200) return false;
       final body = await res.transform(utf8.decoder).join();
-      final decoded = jsonDecode(body);
-      if (decoded is Map<String, dynamic>) return decoded;
-      return null;
+      final data = jsonDecode(body) as Map<String, dynamic>;
+      _firebaseIdToken = data['id_token']?.toString();
+      _firebaseRefreshToken = data['refresh_token']?.toString();
+      _firebaseUid = data['user_id']?.toString();
+      return _firebaseIdToken != null;
     } catch (_) {
-      return null;
+      return false;
     } finally {
       client.close();
     }
   }
 
-  Future<void> _firebasePushAccount(String email, Map<String, dynamic> record) async {
-    if (!_isFirebaseConfigured) return;
+  Future<Map<String, dynamic>?> _firebaseFetchCloudQuota() async {
+    if (_firebaseUid == null || _firebaseIdToken == null) return null;
+
+    // 1. Try Firebase Realtime Database first
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
     try {
-      final String base = _firebaseDbUrl.trim().replaceAll(RegExp(r'/$'), '');
-      final String node = (_firebaseUid != null && _firebaseUid!.isNotEmpty) ? _firebaseUid! : _emailKey(email);
-      final String authParam = (_firebaseIdToken != null && _firebaseIdToken!.isNotEmpty) ? "?auth=$_firebaseIdToken" : "";
-      final uri = Uri.parse("$base/pms_users/$node.json$authParam");
+      final uri = Uri.parse("$_firebaseDbUrl/pms_users/$_firebaseUid.json?auth=$_firebaseIdToken");
+      final req = await client.getUrl(uri);
+      final res = await req.close().timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final body = await res.transform(utf8.decoder).join();
+        final decoded = jsonDecode(body);
+        if (decoded is Map<String, dynamic> && decoded['tier'] != null) {
+          return decoded;
+        }
+      }
+    } catch (_) {
+    } finally {
+      client.close();
+    }
+
+    // 2. Fallback to Firebase Auth Cloud Profile metadata (always works even if RTDB isn't created yet)
+    final lookup = await _firebaseAuthPost("lookup", {"idToken": _firebaseIdToken});
+    if (lookup != null && lookup['users'] is List && (lookup['users'] as List).isNotEmpty) {
+      final userObj = (lookup['users'] as List).first as Map<String, dynamic>;
+      final String displayName = (userObj['displayName'] ?? '').toString();
+      if (displayName.startsWith("PMS|")) {
+        final parts = displayName.split("|");
+        if (parts.length >= 3) {
+          return {
+            'tier': parts[1],
+            'mins': int.tryParse(parts[2]) ?? 0,
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  Future<void> _firebasePushCloudQuota() async {
+    if (_firebaseUid == null || _firebaseIdToken == null) return;
+
+    // 1. Save into Firebase Auth Cloud Profile metadata (guaranteed cloud persistence)
+    await _firebaseAuthPost("update", {
+      "idToken": _firebaseIdToken,
+      "displayName": "PMS|$_userSubscriptionTier|$_dubbingMinutesRemaining",
+      "returnSecureToken": false,
+    });
+
+    // 2. Also write to Firebase Realtime Database node
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+    try {
+      final uri = Uri.parse("$_firebaseDbUrl/pms_users/$_firebaseUid.json?auth=$_firebaseIdToken");
       final req = await client.patchUrl(uri);
       req.headers.set(HttpHeaders.contentTypeHeader, "application/json; charset=utf-8");
-      req.add(utf8.encode(jsonEncode(record)));
+      req.add(utf8.encode(jsonEncode({
+        'email': _signedInUserEmail,
+        'tier': _userSubscriptionTier,
+        'mins': _dubbingMinutesRemaining,
+        'updatedAt': DateTime.now().toIso8601String(),
+      })));
       await req.close().timeout(const Duration(seconds: 8));
     } catch (_) {
     } finally {
@@ -7506,56 +7548,96 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     }
   }
 
+  void _initAdMobSdkSafely() {
+    if (!Platform.isAndroid) return;
+    try {
+      MobileAds.instance.initialize().then((_) {
+        _loadAdMobBanner();
+        _loadAdMobRewardedAd();
+      });
+    } catch (_) {}
+  }
+
+  void _loadAdMobBanner() {
+    if (!Platform.isAndroid || _userSubscriptionTier != "free") return;
+    try {
+      _adMobBanner?.dispose();
+      _isAdMobBannerLoaded = false;
+      _adMobBanner = BannerAd(
+        adUnitId: _adMobTestBannerId,
+        size: AdSize.banner,
+        request: const AdRequest(),
+        listener: BannerAdListener(
+          onAdLoaded: (_) {
+            if (mounted) setState(() => _isAdMobBannerLoaded = true);
+          },
+          onAdFailedToLoad: (ad, _) {
+            ad.dispose();
+            _adMobBanner = null;
+            if (mounted) setState(() => _isAdMobBannerLoaded = false);
+          },
+        ),
+      )..load();
+    } catch (_) {}
+  }
+
+  void _loadAdMobRewardedAd() {
+    if (!Platform.isAndroid || _adMobLoadingRewarded) return;
+    _adMobLoadingRewarded = true;
+    try {
+      RewardedAd.load(
+        adUnitId: _adMobTestRewardedId,
+        request: const AdRequest(),
+        rewardedAdLoadCallback: RewardedAdLoadCallback(
+          onAdLoaded: (ad) {
+            _adMobRewardedAd = ad;
+            _isAdMobRewardedLoaded = true;
+            _adMobLoadingRewarded = false;
+            if (mounted) setState(() {});
+          },
+          onAdFailedToLoad: (_) {
+            _adMobRewardedAd = null;
+            _isAdMobRewardedLoaded = false;
+            _adMobLoadingRewarded = false;
+          },
+        ),
+      );
+    } catch (_) {
+      _adMobLoadingRewarded = false;
+    }
+  }
+
   void _scheduleSafeAccountLoad() {
     if (_accountStateLoaded) return;
     _accountStateLoaded = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      _initAdMobSdkSafely();
       try {
         final dir = await getApplicationDocumentsDirectory();
-        final file = File('${dir.path}/pms_accounts_vault.json');
+        final file = File('${dir.path}/pms_cloud_token.json');
         if (await file.exists()) {
           final data = jsonDecode(await file.readAsString());
-          if (!mounted) return;
-          setState(() {
-            _accountsVault = Map<String, dynamic>.from(data['accounts'] ?? {});
-            if ((data['firebaseApiKey'] ?? '').toString().isNotEmpty) {
-              _firebaseApiKey = data['firebaseApiKey'].toString();
-            }
-            if ((data['firebaseDbUrl'] ?? '').toString().isNotEmpty) {
-              _firebaseDbUrl = data['firebaseDbUrl'].toString();
-            }
-            _firebaseUid = data['firebaseUid'];
-            _firebaseIdToken = data['firebaseIdToken'];
+          _firebaseUid = data['uid']?.toString();
+          _firebaseIdToken = data['idToken']?.toString();
+          _firebaseRefreshToken = data['refreshToken']?.toString();
+          final String? savedEmail = data['email']?.toString();
 
-            final String? activeEmail = data['activeEmail'];
-            if (activeEmail != null && _accountsVault.containsKey(activeEmail)) {
-              final acc = Map<String, dynamic>.from(_accountsVault[activeEmail]);
-              _signedInUserEmail = activeEmail;
-              _userSubscriptionTier = acc['tier'] ?? 'free';
-              _dubbingMinutesRemaining = acc['mins'] ?? 0;
-            } else {
-              _signedInUserEmail = null;
-              _userSubscriptionTier = 'free';
-              _dubbingMinutesRemaining = data['guestMins'] ?? 0;
-            }
-            _selectedDubExportResolution = _userSubscriptionTier == 'pro_20'
-                ? '4K'
-                : (_userSubscriptionTier == 'creator_8' ? '1080p' : '720p');
-          });
-
-          // If signed in and Firebase is configured, silently sync latest quota from cloud
-          if (_signedInUserEmail != null && _isFirebaseConfigured) {
-            final cloudAcc = await _firebaseFetchAccount(
-              _signedInUserEmail!,
-              uid: _firebaseUid,
-              idToken: _firebaseIdToken,
-            );
-            if (cloudAcc != null && mounted) {
-              setState(() {
-                _userSubscriptionTier = cloudAcc['tier'] ?? _userSubscriptionTier;
-                _dubbingMinutesRemaining = cloudAcc['mins'] ?? _dubbingMinutesRemaining;
-                _accountsVault[_signedInUserEmail!] = cloudAcc;
-              });
+          if (_firebaseUid != null && savedEmail != null) {
+            final refreshed = await _refreshFirebaseTokenIfNeeded();
+            if (refreshed || _firebaseIdToken != null) {
+              final cloudAcc = await _firebaseFetchCloudQuota();
+              if (cloudAcc != null && mounted) {
+                setState(() {
+                  _signedInUserEmail = savedEmail;
+                  _userSubscriptionTier = (cloudAcc['tier'] ?? 'free').toString();
+                  _dubbingMinutesRemaining = (cloudAcc['mins'] is int)
+                      ? cloudAcc['mins'] as int
+                      : (int.tryParse(cloudAcc['mins']?.toString() ?? '0') ?? 0);
+                  _selectedDubExportResolution = _userSubscriptionTier == 'pro_20'
+                      ? '4K'
+                      : (_userSubscriptionTier == 'creator_8' ? '1080p' : '720p');
+                });
+              }
             }
           }
         }
@@ -7566,32 +7648,18 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   Future<void> _saveAccountState() async {
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/pms_accounts_vault.json');
-      int guestMins = 0;
-      Map<String, dynamic>? updatedRecord;
-      if (_signedInUserEmail != null && _accountsVault.containsKey(_signedInUserEmail)) {
-        final acc = Map<String, dynamic>.from(_accountsVault[_signedInUserEmail] ?? {});
-        acc['email'] = _signedInUserEmail;
-        acc['tier'] = _userSubscriptionTier;
-        acc['mins'] = _dubbingMinutesRemaining;
-        acc['updatedAt'] = DateTime.now().toIso8601String();
-        _accountsVault[_signedInUserEmail!] = acc;
-        updatedRecord = acc;
-      } else {
-        guestMins = _dubbingMinutesRemaining;
+      final file = File('${dir.path}/pms_cloud_token.json');
+      if (_signedInUserEmail == null || _firebaseUid == null) {
+        if (await file.exists()) await file.delete();
+        return;
       }
       await file.writeAsString(jsonEncode({
-        'activeEmail': _signedInUserEmail,
-        'guestMins': guestMins,
-        'firebaseApiKey': _firebaseApiKey,
-        'firebaseDbUrl': _firebaseDbUrl,
-        'firebaseUid': _firebaseUid,
-        'firebaseIdToken': _firebaseIdToken,
-        'accounts': _accountsVault,
+        'email': _signedInUserEmail,
+        'uid': _firebaseUid,
+        'idToken': _firebaseIdToken,
+        'refreshToken': _firebaseRefreshToken,
       }));
-      if (_signedInUserEmail != null && updatedRecord != null && _isFirebaseConfigured) {
-        await _firebasePushAccount(_signedInUserEmail!, updatedRecord);
-      }
+      await _firebasePushCloudQuota();
     } catch (_) {}
   }
 
@@ -7672,14 +7740,63 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   }
 
   Future<bool> _playRewardedAdDialog({required String rewardDescription}) async {
+    // 1. Require Firebase Cloud Sign-In first so ad minutes are strictly bound to a cloud account
+    if (_signedInUserEmail == null || _firebaseUid == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("☁️ Please sign in to your Studio Cloud account first so your minutes are saved.")),
+      );
+      final signedIn = await _promptAccountSignIn();
+      if (!signedIn) return false;
+    }
+
+    // 2. If real AdMob RewardedAd isn't loaded yet, trigger load and wait up to 4 seconds
+    if (Platform.isAndroid && (!_isAdMobRewardedLoaded || _adMobRewardedAd == null)) {
+      _loadAdMobRewardedAd();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("🎬 Loading Google AdMob Test Video Ad..."),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      for (int i = 0; i < 8; i++) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (_isAdMobRewardedLoaded && _adMobRewardedAd != null) break;
+      }
+    }
+
+    // 3. Show native fullscreen Google AdMob Test Rewarded Video Ad if loaded
+    if (Platform.isAndroid && _isAdMobRewardedLoaded && _adMobRewardedAd != null) {
+      final Completer<bool> completer = Completer<bool>();
+      bool rewardEarned = false;
+      _adMobRewardedAd!.fullScreenContentCallback = FullScreenContentCallback(
+        onAdDismissedFullScreenContent: (ad) {
+          ad.dispose();
+          _adMobRewardedAd = null;
+          _isAdMobRewardedLoaded = false;
+          _loadAdMobRewardedAd();
+          if (!completer.isCompleted) completer.complete(rewardEarned);
+        },
+        onAdFailedToShowFullScreenContent: (ad, _) {
+          ad.dispose();
+          _adMobRewardedAd = null;
+          _isAdMobRewardedLoaded = false;
+          _loadAdMobRewardedAd();
+          if (!completer.isCompleted) completer.complete(false);
+        },
+      );
+      await _adMobRewardedAd!.show(
+        onUserEarnedReward: (_, __) {
+          rewardEarned = true;
+        },
+      );
+      final bool adMobResult = await completer.future;
+      if (adMobResult) return true;
+    }
+
+    // 4. Fallback interactive AdMob Test Video simulator (if Google Play Services inventory is throttled or blocked by DNS)
     int secondsLeft = 5;
     bool completed = false;
     bool claimed = false;
-    final String activeNetLabel = _activeAdProvider == "admob"
-        ? "Google AdMob Test Rewarded Video"
-        : (_activeAdProvider == "startio"
-            ? "Start.io Rewarded Video (#$_startIoAppId)"
-            : "AdMob Test + Start.io (#$_startIoAppId)");
 
     await showDialog(
       context: context,
@@ -7704,7 +7821,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               title: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text("🎬 Sponsored Video Ad", style: TextStyle(color: Colors.amberAccent, fontSize: 15, fontWeight: FontWeight.bold)),
+                  const Text("🎬 Google AdMob Test Ad", style: TextStyle(color: Colors.amberAccent, fontSize: 15, fontWeight: FontWeight.bold)),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(6)),
@@ -7724,22 +7841,22 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(color: Colors.tealAccent.withOpacity(0.4)),
                     ),
-                    child: Column(
+                    child: const Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.play_circle_fill_rounded, color: Colors.tealAccent, size: 40),
-                        const SizedBox(height: 6),
-                        Text(activeNetLabel, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.center),
-                        const SizedBox(height: 4),
-                        const Text("AdMob Unit: ...5224354917 • Start.io ID: 209515884", style: TextStyle(color: Colors.white60, fontSize: 10)),
+                        Icon(Icons.play_circle_fill_rounded, color: Colors.tealAccent, size: 42),
+                        SizedBox(height: 6),
+                        Text("Google AdMob Official Test Rewarded Video", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.center),
+                        SizedBox(height: 4),
+                        Text("Unit ID: ca-app-pub-3940256099942544/5224354917", style: TextStyle(color: Colors.white60, fontSize: 10)),
                       ],
                     ),
                   ),
                   const SizedBox(height: 10),
                   Text(
                     secondsLeft > 0
-                        ? "Watching ad to unlock: $rewardDescription..."
-                        : "✅ Ad completed! Tap Claim below to unlock $rewardDescription.",
+                        ? "Playing AdMob Test Video to unlock: $rewardDescription..."
+                        : "✅ AdMob Test Video complete! Tap Claim Reward below.",
                     style: const TextStyle(color: Colors.white70, fontSize: 12),
                     textAlign: TextAlign.center,
                   ),
@@ -7778,7 +7895,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       await _saveAccountState();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("🎉 +$minutesToAdd Dubbing Minutes added! (Balance: $_dubbingMinutesRemaining mins)")),
+          SnackBar(content: Text("🎉 +$minutesToAdd Dubbing Minutes synced to Firebase Cloud! (Balance: $_dubbingMinutesRemaining mins)")),
         );
       }
     }
@@ -7791,6 +7908,11 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     if (cat == "free") {
       await _runPreset(p);
       return;
+    }
+
+    if (_signedInUserEmail == null || _firebaseUid == null) {
+      final signedIn = await _promptAccountSignIn();
+      if (!signedIn) return;
     }
 
     if (cat == "pro_20_only" && _userSubscriptionTier != "pro_20") {
@@ -7827,7 +7949,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           backgroundColor: const Color(0xFF1A1A1A),
           title: Text("💎 Unlock $title", style: const TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold, fontSize: 15.5)),
           content: const Text(
-            "This studio feature is unlimited & 100% offline in Creator Pass (€8/mo) and Pro Studio (€20/mo).\n\nOn the Free Tier, watch 1 quick ad to unlock it for this video, or upgrade for ad-free offline access.",
+            "This studio feature is unlimited in Creator Pass (€8/mo) and Pro Studio (€20/mo).\n\nOn the Free Tier, watch 1 quick AdMob video ad to unlock it for this video, or upgrade for ad-free access.",
             style: TextStyle(color: Colors.white70, fontSize: 12.5),
           ),
           actions: [
@@ -7869,7 +7991,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     await _saveAccountState();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("🎬 Using $requiredMins mins from quota ($_dubbingMinutesRemaining mins left). 100% Local & Private.")),
+        SnackBar(content: Text("🎬 Using $requiredMins mins from Firebase Cloud quota ($_dubbingMinutesRemaining mins left).")),
       );
     }
     await _runPreset(p);
@@ -7895,12 +8017,12 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  "Remaining Balance: $_dubbingMinutesRemaining Mins (Need $neededMins Mins)",
+                  "Cloud Balance: $_dubbingMinutesRemaining Mins (Need $neededMins Mins)",
                   style: const TextStyle(color: Colors.amberAccent, fontSize: 12),
                 ),
                 const SizedBox(height: 10),
                 const Text(
-                  "• Watch Rewarded Ads: Each ad adds +2 minutes (2–3 ads unlock a 5-min video). Works on Free, €8, and €20 plans whenever your minutes run out.\n• Creator Pass (€8/mo): 60 Mins/month + ✈️ 100% Offline Airplane Mode + zero banner ads.\n• Pro Studio (€20/mo): 250 Mins/month + 4K + ElevenLabs/Fish Voice Cloning + All 37 AI Models.",
+                  "• Watch Google AdMob Rewarded Ads: Each ad adds +2 minutes (2–3 ads unlock a 5-min video). Synced to your Firebase Cloud account.\n• Creator Pass (€8/mo): 60 Mins/month + zero banner ads.\n• Pro Studio (€20/mo): 250 Mins/month + 4K + ElevenLabs/Fish Voice Cloning + All 37 AI Models.",
                   style: TextStyle(color: Colors.white70, fontSize: 11.5),
                 ),
                 const SizedBox(height: 12),
@@ -7909,7 +8031,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.amber.shade700, foregroundColor: Colors.black),
                     icon: const Icon(Icons.ondemand_video_rounded, size: 18),
-                    label: Text("Watch Ad (+2 Mins) • Need $adsNeeded Ad(s)"),
+                    label: Text("Watch AdMob Ad (+2 Mins) • Need $adsNeeded Ad(s)"),
                     onPressed: () async {
                       Navigator.pop(ctx);
                       await _showRewardedAdForMinutes(minutesToAdd: 2);
@@ -7934,23 +8056,6 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                     },
                   ),
                 ),
-                if (_userSubscriptionTier == "pro_20") ...[
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.purpleAccent)),
-                      icon: const Icon(Icons.business_center_rounded, color: Colors.purpleAccent, size: 18),
-                      label: const Text("Contact for Custom Studio License", style: TextStyle(color: Colors.purpleAccent)),
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("📧 Enterprise Licensing: Contact Avender Ltd Studio Team for unlimited commercial volume.")),
-                        );
-                      },
-                    ),
-                  ),
-                ],
               ],
             ),
           ),
@@ -7962,107 +8067,33 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     );
   }
 
-  Future<void> _showFirebaseSetupModal(StateSetter setParentState) async {
-    final apiCtrl = TextEditingController(text: _firebaseApiKey);
-    final dbCtrl = TextEditingController(text: _firebaseDbUrl);
-    await showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF161616),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: const BorderSide(color: Colors.amberAccent),
-        ),
-        title: const Row(
-          children: [
-            Icon(Icons.cloud_sync_rounded, color: Colors.amberAccent, size: 20),
-            SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                "Firebase Cloud Sync Setup",
-                style: TextStyle(color: Colors.amberAccent, fontSize: 15, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                "Connect your free Firebase project (Spark Plan) to sync accounts, passwords, and minute quotas across devices and prevent reinstall resets.\n\n"
-                "Leave blank to use 100% local encrypted device vault.",
-                style: TextStyle(color: Colors.white70, fontSize: 11.5),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: apiCtrl,
-                style: const TextStyle(color: Colors.white, fontSize: 12),
-                decoration: InputDecoration(
-                  labelText: "Firebase Web API Key (AIzaSy...)",
-                  labelStyle: const TextStyle(color: Colors.white60, fontSize: 11.5),
-                  filled: true,
-                  fillColor: const Color(0xFF101010),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: dbCtrl,
-                style: const TextStyle(color: Colors.white, fontSize: 12),
-                decoration: InputDecoration(
-                  labelText: "Realtime DB URL (https://your-app.firebasedatabase.app)",
-                  labelStyle: const TextStyle(color: Colors.white60, fontSize: 11.5),
-                  filled: true,
-                  fillColor: const Color(0xFF101010),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel", style: TextStyle(color: Colors.white54)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.amberAccent, foregroundColor: Colors.black),
-            onPressed: () async {
-              setState(() {
-                _firebaseApiKey = apiCtrl.text.trim();
-                _firebaseDbUrl = dbCtrl.text.trim();
-              });
-              await _saveAccountState();
-              setParentState(() {});
-              if (ctx.mounted) Navigator.pop(ctx);
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      _isFirebaseConfigured
-                          ? "☁️ Firebase Cloud Auth & Quota Sync enabled!"
-                          : "🔒 Using Local Encrypted Device Vault.",
-                    ),
-                  ),
-                );
-              }
-            },
-            child: const Text("Save Cloud Config", style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
+  String _formatFirebaseError(String raw) {
+    if (raw.contains("CONFIGURATION_NOT_FOUND")) {
+      return "❌ Enable Email/Password in Firebase Console → Authentication → Sign-in method.";
+    }
+    if (raw.contains("EMAIL_EXISTS")) {
+      return "❌ This email is already registered. Switch to the 'Sign In' tab.";
+    }
+    if (raw.contains("EMAIL_NOT_FOUND") || raw.contains("INVALID_LOGIN_CREDENTIALS") || raw.contains("INVALID_PASSWORD")) {
+      return "❌ Incorrect email or password.";
+    }
+    if (raw.contains("USER_DISABLED")) {
+      return "❌ This account has been disabled.";
+    }
+    if (raw.contains("TOO_MANY_ATTEMPTS_TRY_LATER")) {
+      return "❌ Too many attempts. Please wait a moment and try again.";
+    }
+    if (raw.contains("WEAK_PASSWORD")) {
+      return "❌ Password must be at least 6 characters.";
+    }
+    return "❌ Cloud Auth Error: $raw";
   }
 
   Future<bool> _promptAccountSignIn() async {
     final TextEditingController emailCtrl = TextEditingController(text: _signedInUserEmail ?? "");
     final TextEditingController passCtrl = TextEditingController();
     final TextEditingController confirmPassCtrl = TextEditingController();
-    final TextEditingController pinCtrl = TextEditingController();
-    bool isRegisterMode = _accountsVault.isEmpty && _signedInUserEmail == null;
-    bool isResetMode = false;
+    bool isRegisterMode = false;
     bool obscurePass = true;
     bool isBusy = false;
     String? errorMsg;
@@ -8082,45 +8113,12 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           ),
           title: Row(
             children: [
-              const Icon(Icons.lock_person_rounded, color: Colors.tealAccent),
+              const Icon(Icons.cloud_done_rounded, color: Colors.tealAccent, size: 20),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  isResetMode
-                      ? "Reset Account Password"
-                      : (isRegisterMode ? "Create Studio Account" : "Sign In to Account"),
+                  isRegisterMode ? "Create Studio Cloud Account" : "Sign In to Studio Cloud",
                   style: const TextStyle(color: Colors.tealAccent, fontSize: 15, fontWeight: FontWeight.bold),
-                ),
-              ),
-              InkWell(
-                onTap: () => _showFirebaseSetupModal(setAuthState),
-                borderRadius: BorderRadius.circular(6),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: _isFirebaseConfigured ? Colors.teal.withOpacity(0.25) : Colors.white10,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: _isFirebaseConfigured ? Colors.tealAccent : Colors.white24),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _isFirebaseConfigured ? Icons.cloud_done_rounded : Icons.cloud_outlined,
-                        color: _isFirebaseConfigured ? Colors.tealAccent : Colors.white70,
-                        size: 13,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        _isFirebaseConfigured ? "Firebase ON" : "Cloud",
-                        style: TextStyle(
-                          color: _isFirebaseConfigured ? Colors.tealAccent : Colors.white70,
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
                 ),
               ),
             ],
@@ -8130,69 +8128,68 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (!isResetMode)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF101010),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.white12),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: InkWell(
-                            onTap: () => setAuthState(() {
-                              isRegisterMode = false;
-                              errorMsg = null;
-                            }),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              decoration: BoxDecoration(
-                                color: !isRegisterMode ? Colors.tealAccent.withOpacity(0.2) : Colors.transparent,
-                                borderRadius: BorderRadius.circular(7),
-                                border: !isRegisterMode ? Border.all(color: Colors.tealAccent) : null,
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(
-                                "Sign In",
-                                style: TextStyle(
-                                  color: !isRegisterMode ? Colors.tealAccent : Colors.white54,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: InkWell(
-                            onTap: () => setAuthState(() {
-                              isRegisterMode = true;
-                              errorMsg = null;
-                            }),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              decoration: BoxDecoration(
-                                color: isRegisterMode ? Colors.amberAccent.withOpacity(0.2) : Colors.transparent,
-                                borderRadius: BorderRadius.circular(7),
-                                border: isRegisterMode ? Border.all(color: Colors.amberAccent) : null,
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(
-                                "Create Account",
-                                style: TextStyle(
-                                  color: isRegisterMode ? Colors.amberAccent : Colors.white54,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF101010),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white12),
                   ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: () => setAuthState(() {
+                            isRegisterMode = false;
+                            errorMsg = null;
+                          }),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: !isRegisterMode ? Colors.tealAccent.withOpacity(0.2) : Colors.transparent,
+                              borderRadius: BorderRadius.circular(7),
+                              border: !isRegisterMode ? Border.all(color: Colors.tealAccent) : null,
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              "Sign In",
+                              style: TextStyle(
+                                color: !isRegisterMode ? Colors.tealAccent : Colors.white54,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: InkWell(
+                          onTap: () => setAuthState(() {
+                            isRegisterMode = true;
+                            errorMsg = null;
+                          }),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: isRegisterMode ? Colors.amberAccent.withOpacity(0.2) : Colors.transparent,
+                              borderRadius: BorderRadius.circular(7),
+                              border: isRegisterMode ? Border.all(color: Colors.amberAccent) : null,
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              "Create Account",
+                              style: TextStyle(
+                                color: isRegisterMode ? Colors.amberAccent : Colors.white54,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
 
                 if (errorMsg != null)
                   Container(
@@ -8229,7 +8226,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                   obscureText: obscurePass,
                   style: const TextStyle(color: Colors.white, fontSize: 13),
                   decoration: InputDecoration(
-                    labelText: isResetMode ? "New Password (min 6 chars)" : "Password (Required)",
+                    labelText: "Password (min 6 chars)",
                     labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
                     prefixIcon: const Icon(Icons.lock_outline, color: Colors.tealAccent, size: 18),
                     suffixIcon: IconButton(
@@ -8256,90 +8253,40 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: pinCtrl,
-                    keyboardType: TextInputType.number,
-                    maxLength: 4,
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                    decoration: InputDecoration(
-                      labelText: "4-Digit Offline Recovery PIN (e.g. 1234)",
-                      counterText: "",
-                      labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
-                      prefixIcon: const Icon(Icons.pin_outlined, color: Colors.amberAccent, size: 18),
-                      filled: true,
-                      fillColor: const Color(0xFF121212),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                  ),
                 ],
-                if (isResetMode) ...[
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: pinCtrl,
-                    keyboardType: TextInputType.number,
-                    maxLength: 4,
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                    decoration: InputDecoration(
-                      labelText: "Enter Your 4-Digit Recovery PIN",
-                      counterText: "",
-                      labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
-                      prefixIcon: const Icon(Icons.pin_outlined, color: Colors.amberAccent, size: 18),
-                      filled: true,
-                      fillColor: const Color(0xFF121212),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                  ),
-                  if (_firebaseApiKey.trim().isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.amberAccent)),
-                        icon: const Icon(Icons.mark_email_read_outlined, color: Colors.amberAccent, size: 15),
-                        label: const Text("Send Firebase Reset Email Instead", style: TextStyle(color: Colors.amberAccent, fontSize: 11)),
-                        onPressed: () async {
-                          final String email = emailCtrl.text.trim().toLowerCase();
-                          if (!emailRegex.hasMatch(email)) {
-                            setAuthState(() => errorMsg = "❌ Enter your email address above first.");
-                            return;
-                          }
-                          final res = await _firebaseAuthPost("sendOobCode", {
-                            "requestType": "PASSWORD_RESET",
-                            "email": email,
-                          });
-                          if (res != null && res['error'] == null) {
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text("📧 Firebase password reset email sent to $email!")),
-                              );
-                            }
-                          } else {
-                            setAuthState(() => errorMsg = "❌ Could not send reset email. Check address or use 4-Digit PIN.");
-                          }
-                        },
-                      ),
-                    ),
-                ],
-                if (!isRegisterMode && !isResetMode)
+                if (!isRegisterMode)
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
-                      onPressed: () => setAuthState(() {
-                        isResetMode = true;
-                        errorMsg = null;
-                      }),
-                      child: const Text("Forgot Password?", style: TextStyle(color: Colors.amberAccent, fontSize: 11)),
-                    ),
-                  ),
-                if (isResetMode)
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: () => setAuthState(() {
-                        isResetMode = false;
-                        errorMsg = null;
-                      }),
-                      child: const Text("← Back to Sign In", style: TextStyle(color: Colors.tealAccent, fontSize: 11)),
+                      onPressed: isBusy
+                          ? null
+                          : () async {
+                              final String email = emailCtrl.text.trim().toLowerCase();
+                              if (!emailRegex.hasMatch(email)) {
+                                setAuthState(() => errorMsg = "❌ Enter your registered email address above first.");
+                                return;
+                              }
+                              setAuthState(() {
+                                isBusy = true;
+                                errorMsg = null;
+                              });
+                              final res = await _firebaseAuthPost("sendOobCode", {
+                                "requestType": "PASSWORD_RESET",
+                                "email": email,
+                              });
+                              setAuthState(() => isBusy = false);
+                              if (res != null && res['error'] == null) {
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text("📧 Password reset email sent to $email!")),
+                                  );
+                                }
+                              } else {
+                                final String rawErr = (res?['error']?['message'] ?? 'NETWORK_ERROR').toString();
+                                setAuthState(() => errorMsg = _formatFirebaseError(rawErr));
+                              }
+                            },
+                      child: const Text("Forgot Password? (Send Reset Email)", style: TextStyle(color: Colors.amberAccent, fontSize: 11)),
                     ),
                   ),
               ],
@@ -8353,15 +8300,17 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                     _signedInUserEmail = null;
                     _firebaseUid = null;
                     _firebaseIdToken = null;
+                    _firebaseRefreshToken = null;
                     _userSubscriptionTier = "free";
                     _dubbingMinutesRemaining = 0;
                     _selectedDubExportResolution = "720p";
                   });
                   await _saveAccountState();
+                  _loadAdMobBanner();
                   if (ctx.mounted) Navigator.pop(ctx);
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text("🔒 Signed out. Returned to Free Guest Mode.")),
+                      const SnackBar(content: Text("🔒 Signed out of Studio Cloud.")),
                     );
                   }
                 },
@@ -8383,9 +8332,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                 size: 16,
               ),
               label: Text(
-                isBusy
-                    ? "Verifying..."
-                    : (isResetMode ? "Reset Password" : (isRegisterMode ? "Create Account" : "Sign In")),
+                isBusy ? "Verifying Cloud..." : (isRegisterMode ? "Create Account" : "Sign In"),
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               onPressed: isBusy
@@ -8395,11 +8342,15 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                       final String pass = passCtrl.text;
 
                       if (!emailRegex.hasMatch(email)) {
-                        setAuthState(() => errorMsg = "❌ Please enter a valid email address (e.g. name@domain.com).");
+                        setAuthState(() => errorMsg = "❌ Please enter a valid email address.");
                         return;
                       }
                       if (pass.length < 6) {
-                        setAuthState(() => errorMsg = "❌ Password is required and must be at least 6 characters.");
+                        setAuthState(() => errorMsg = "❌ Password must be at least 6 characters.");
+                        return;
+                      }
+                      if (isRegisterMode && pass != confirmPassCtrl.text) {
+                        setAuthState(() => errorMsg = "❌ Passwords do not match.");
                         return;
                       }
 
@@ -8408,96 +8359,33 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         errorMsg = null;
                       });
 
-                      // 1. PASSWORD RESET FLOW (PIN VERIFIED)
-                      if (isResetMode) {
-                        Map<String, dynamic>? acc = _accountsVault.containsKey(email)
-                            ? Map<String, dynamic>.from(_accountsVault[email])
-                            : await _firebaseFetchAccount(email);
-                        if (acc == null) {
-                          setAuthState(() {
-                            isBusy = false;
-                            errorMsg = "❌ No account found with this email.";
-                          });
-                          return;
-                        }
-                        if ((acc['pin'] ?? '') != pinCtrl.text.trim()) {
-                          setAuthState(() {
-                            isBusy = false;
-                            errorMsg = "❌ Invalid 4-Digit Recovery PIN.";
-                          });
-                          return;
-                        }
-                        acc['passwordHash'] = _hashPassword(email, pass);
-                        _accountsVault[email] = acc;
-                        await _saveAccountState();
-                        await _firebasePushAccount(email, acc);
-                        setAuthState(() {
-                          isBusy = false;
-                          isResetMode = false;
-                          errorMsg = null;
-                        });
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text("✅ Password updated! You can now sign in.")),
-                          );
-                        }
-                        return;
-                      }
-
-                      // 2. CREATE ACCOUNT (SIGN UP) FLOW
+                      // 1. CREATE ACCOUNT ON FIREBASE CLOUD
                       if (isRegisterMode) {
-                        if (pass != confirmPassCtrl.text) {
+                        final fbRes = await _firebaseAuthPost("signUp", {
+                          "email": email,
+                          "password": pass,
+                          "returnSecureToken": true,
+                        });
+                        if (fbRes == null) {
                           setAuthState(() {
                             isBusy = false;
-                            errorMsg = "❌ Passwords do not match.";
+                            errorMsg = "❌ Network error: Connect to the internet to register.";
                           });
                           return;
                         }
-                        if (pinCtrl.text.trim().length != 4) {
+                        if (fbRes['error'] != null) {
+                          final String rawErr = (fbRes['error']['message'] ?? 'UNKNOWN').toString();
                           setAuthState(() {
                             isBusy = false;
-                            errorMsg = "❌ Please enter a 4-digit Recovery PIN (e.g. 1234).";
-                          });
-                          return;
-                        }
-                        if (_accountsVault.containsKey(email)) {
-                          setAuthState(() {
-                            isBusy = false;
-                            errorMsg = "❌ Account already exists! Switch to the 'Sign In' tab.";
+                            errorMsg = _formatFirebaseError(rawErr);
                           });
                           return;
                         }
 
-                        // If Firebase Auth is configured, register on Firebase Cloud first
-                        if (_firebaseApiKey.trim().isNotEmpty) {
-                          final fbRes = await _firebaseAuthPost("signUp", {
-                            "email": email,
-                            "password": pass,
-                            "returnSecureToken": true,
-                          });
-                          if (fbRes != null && fbRes['error'] != null) {
-                            final String fbErr = (fbRes['error']['message'] ?? 'FIREBASE_ERROR').toString();
-                            setAuthState(() {
-                              isBusy = false;
-                              errorMsg = "❌ Firebase Auth: $fbErr";
-                            });
-                            return;
-                          }
-                          if (fbRes != null) {
-                            _firebaseUid = fbRes['localId']?.toString();
-                            _firebaseIdToken = fbRes['idToken']?.toString();
-                          }
-                        }
+                        _firebaseUid = fbRes['localId']?.toString();
+                        _firebaseIdToken = fbRes['idToken']?.toString();
+                        _firebaseRefreshToken = fbRes['refreshToken']?.toString();
 
-                        final newRecord = {
-                          'email': email,
-                          'passwordHash': _hashPassword(email, pass),
-                          'pin': pinCtrl.text.trim(),
-                          'tier': 'free',
-                          'mins': 0,
-                          'createdAt': DateTime.now().toIso8601String(),
-                        };
-                        _accountsVault[email] = newRecord;
                         setState(() {
                           _signedInUserEmail = email;
                           _userSubscriptionTier = 'free';
@@ -8509,85 +8397,58 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         if (ctx.mounted) Navigator.pop(ctx);
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text("🎉 Account created & signed in as $email")),
+                            SnackBar(content: Text("🎉 Cloud account created & signed in as $email")),
                           );
                         }
                         return;
                       }
 
-                      // 3. STRICT SIGN-IN FLOW (FIREBASE CLOUD + LOCAL VAULT)
-                      Map<String, dynamic>? acc;
-                      if (_firebaseApiKey.trim().isNotEmpty) {
-                        final fbRes = await _firebaseAuthPost("signInWithPassword", {
-                          "email": email,
-                          "password": pass,
-                          "returnSecureToken": true,
+                      // 2. SIGN IN VIA FIREBASE CLOUD
+                      final fbRes = await _firebaseAuthPost("signInWithPassword", {
+                        "email": email,
+                        "password": pass,
+                        "returnSecureToken": true,
+                      });
+                      if (fbRes == null) {
+                        setAuthState(() {
+                          isBusy = false;
+                          errorMsg = "❌ Network error: Connect to the internet to sign in.";
                         });
-                        if (fbRes != null && fbRes['error'] != null) {
-                          setAuthState(() {
-                            isBusy = false;
-                            errorMsg = "❌ Invalid email or password (Firebase Auth).";
-                          });
-                          return;
-                        }
-                        if (fbRes != null && fbRes['localId'] != null) {
-                          _firebaseUid = fbRes['localId'].toString();
-                          _firebaseIdToken = fbRes['idToken']?.toString();
-                          acc = await _firebaseFetchAccount(email, uid: _firebaseUid, idToken: _firebaseIdToken);
-                          acc ??= {
-                            'email': email,
-                            'passwordHash': _hashPassword(email, pass),
-                            'pin': '0000',
-                            'tier': 'free',
-                            'mins': 0,
-                          };
-                          _accountsVault[email] = acc;
-                        }
+                        return;
+                      }
+                      if (fbRes['error'] != null) {
+                        final String rawErr = (fbRes['error']['message'] ?? 'UNKNOWN').toString();
+                        setAuthState(() {
+                          isBusy = false;
+                          errorMsg = _formatFirebaseError(rawErr);
+                        });
+                        return;
                       }
 
-                      // Offline / Local Vault Verification
-                      if (acc == null) {
-                        if (!_accountsVault.containsKey(email)) {
-                          // Check if account exists in Firebase DB by email hash
-                          final cloudByEmail = await _firebaseFetchAccount(email);
-                          if (cloudByEmail != null) {
-                            acc = cloudByEmail;
-                            _accountsVault[email] = acc;
-                          } else {
-                            setAuthState(() {
-                              isBusy = false;
-                              errorMsg = "❌ Account not found! Tap 'Create Account' first to register.";
-                            });
-                            return;
-                          }
-                        } else {
-                          acc = Map<String, dynamic>.from(_accountsVault[email]);
-                        }
+                      _firebaseUid = fbRes['localId']?.toString();
+                      _firebaseIdToken = fbRes['idToken']?.toString();
+                      _firebaseRefreshToken = fbRes['refreshToken']?.toString();
 
-                        final String expectedHash = acc['passwordHash'] ?? '';
-                        if (_hashPassword(email, pass) != expectedHash) {
-                          setAuthState(() {
-                            isBusy = false;
-                            errorMsg = "❌ Incorrect password for $email.";
-                          });
-                          return;
-                        }
-                      }
+                      final Map<String, dynamic>? cloudAcc = await _firebaseFetchCloudQuota();
+                      final String restoredTier = (cloudAcc?['tier'] ?? 'free').toString();
+                      final int restoredMins = (cloudAcc?['mins'] is int)
+                          ? cloudAcc!['mins'] as int
+                          : (int.tryParse(cloudAcc?['mins']?.toString() ?? '0') ?? 0);
 
                       setState(() {
                         _signedInUserEmail = email;
-                        _userSubscriptionTier = acc!['tier'] ?? 'free';
-                        _dubbingMinutesRemaining = acc['mins'] ?? 0;
-                        _selectedDubExportResolution = _userSubscriptionTier == 'pro_20'
+                        _userSubscriptionTier = restoredTier;
+                        _dubbingMinutesRemaining = restoredMins;
+                        _selectedDubExportResolution = restoredTier == 'pro_20'
                             ? '4K'
-                            : (_userSubscriptionTier == 'creator_8' ? '1080p' : '720p');
+                            : (restoredTier == 'creator_8' ? '1080p' : '720p');
                       });
                       await _saveAccountState();
                       signedIn = true;
                       if (ctx.mounted) Navigator.pop(ctx);
                       if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text("✅ Authenticated & signed in as $email")),
+                          SnackBar(content: Text("✅ Verified & synced from Firebase Cloud ($restoredMins mins available)")),
                         );
                       }
                     },
@@ -8605,7 +8466,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setPaywallState) => AlertDialog(
           backgroundColor: const Color(0xFF1E1E1E),
-          title: const Text("💎 Account, Plans & Ad Tester", style: TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold, fontSize: 16)),
+          title: const Text("💎 Cloud Account, Plans & AdMob", style: TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold, fontSize: 16)),
           content: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -8626,13 +8487,13 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              _signedInUserEmail != null ? "👤 $_signedInUserEmail" : "👤 Guest Mode (Not Signed In)",
+                              _signedInUserEmail != null ? "☁️ $_signedInUserEmail" : "🔒 Not Signed In (Cloud Required)",
                               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
                               overflow: TextOverflow.ellipsis,
                             ),
                             const SizedBox(height: 3),
                             Text(
-                              "⏱️ Quota: $_dubbingMinutesRemaining Mins • 100% Local Privacy",
+                              "⏱️ Cloud Quota: $_dubbingMinutesRemaining Mins",
                               style: const TextStyle(color: Colors.amberAccent, fontSize: 11),
                             ),
                           ],
@@ -8654,54 +8515,36 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                 const SizedBox(height: 10),
                 _buildPlanTile(
                   "Free Tier (€0/mo)",
-                  "• 720p/480p, <10MB/<16MB, MP3/WAV, GIF, Speed, Extract SRT, Models #1–#7 (0.5B–1.7B)\n• Small bottom banner + watch 2–3 ads for 5m dubbing (720p with watermark)",
+                  "• 720p/480p, <10MB/<16MB, MP3/WAV, GIF, Speed, Extract SRT, Models #1–#7 (0.5B–1.7B)\n• Bottom AdMob banner + watch 2–3 AdMob ads for 5m dubbing (720p with watermark)",
                   "free",
                   Colors.white54,
                 ),
                 const SizedBox(height: 8),
                 _buildPlanTile(
                   "Creator Pass (€8/mo)",
-                  "• Zero banner ads + ✈️ 100% Offline Airplane Mode\n• 60 Mins/mo Auto-Dub & Subtitles (1080p Full HD, no watermark)\n• Unlocks Auto-Cut Silence, 9:16 Viral, 60 FPS, Denoise, Karaoke, Live Call & Models #1–#19 (up to 7B)\n• Out of minutes? Watch ads for bonus minutes!",
+                  "• Zero banner ads + 60 Mins/mo Auto-Dub & Subtitles (1080p Full HD, no watermark)\n• Unlocks Auto-Cut Silence, 9:16 Viral, 60 FPS, Denoise, Karaoke, Live Call & Models #1–#19 (up to 7B)\n• Out of minutes? Watch AdMob ads for bonus minutes!",
                   "creator_8",
                   Colors.tealAccent,
                 ),
                 const SizedBox(height: 8),
                 _buildPlanTile(
                   "Pro Studio (€20/mo)",
-                  "• 250 Mins/mo + 👑 4K Ultra HD + Auto-Dub & Burn Subtitles Together\n• 🔑 ElevenLabs & Fish Audio Voice Cloning\n• Unlocks All 37 AI Models (up to 671B) + Load .GGUF + Custom License option",
+                  "• 250 Mins/mo + 👑 4K Ultra HD + Auto-Dub & Burn Subtitles Together\n• 🔑 ElevenLabs & Fish Audio Voice Cloning\n• Unlocks All 37 AI Models (up to 671B) + Load .GGUF",
                   "pro_20",
                   Colors.amberAccent,
                 ),
                 const Divider(color: Colors.white24, height: 20),
-                const Text("🧪 Ad Network Mode (AdMob Test + Start.io #209515884):", style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  children: [
-                    ChoiceChip(
-                      label: const Text("Both", style: TextStyle(fontSize: 10.5)),
-                      selected: _activeAdProvider == "both",
-                      onSelected: (_) => setPaywallState(() => setState(() => _activeAdProvider = "both")),
-                    ),
-                    ChoiceChip(
-                      label: const Text("AdMob Test", style: TextStyle(fontSize: 10.5)),
-                      selected: _activeAdProvider == "admob",
-                      onSelected: (_) => setPaywallState(() => setState(() => _activeAdProvider = "admob")),
-                    ),
-                    ChoiceChip(
-                      label: const Text("Start.io (209515884)", style: TextStyle(fontSize: 10.5)),
-                      selected: _activeAdProvider == "startio",
-                      onSelected: (_) => setPaywallState(() => setState(() => _activeAdProvider = "startio")),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.teal.shade800, foregroundColor: Colors.white),
-                    icon: const Icon(Icons.play_circle_outline, size: 16),
-                    label: const Text("Watch Test Rewarded Ad (+2 Mins)", style: TextStyle(fontSize: 11.5)),
+                    icon: const Icon(Icons.ondemand_video_rounded, size: 16),
+                    label: Text(
+                      _isAdMobRewardedLoaded
+                          ? "Watch Google AdMob Rewarded Ad (+2 Mins)"
+                          : "Test Google AdMob Rewarded Ad (+2 Mins)",
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                    ),
                     onPressed: () {
                       Navigator.pop(ctx);
                       _showRewardedAdForMinutes(minutesToAdd: 2);
@@ -8723,7 +8566,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     final bool isSelected = _userSubscriptionTier == tierId;
     return InkWell(
       onTap: () async {
-        if (tierId != "free" && _signedInUserEmail == null) {
+        if (_signedInUserEmail == null || _firebaseUid == null) {
           final ok = await _promptAccountSignIn();
           if (!ok) return;
         }
@@ -8732,19 +8575,26 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           if (tierId == "free") {
             _dubbingMinutesRemaining = 0;
             _selectedDubExportResolution = "720p";
+            _loadAdMobBanner();
           } else if (tierId == "creator_8") {
             _dubbingMinutesRemaining = 60;
             _selectedDubExportResolution = "1080p";
+            _adMobBanner?.dispose();
+            _adMobBanner = null;
+            _isAdMobBannerLoaded = false;
           } else if (tierId == "pro_20") {
             _dubbingMinutesRemaining = 250;
             _selectedDubExportResolution = "4K";
+            _adMobBanner?.dispose();
+            _adMobBanner = null;
+            _isAdMobBannerLoaded = false;
           }
         });
         await _saveAccountState();
         if (mounted) Navigator.pop(context);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("✅ Activated $name ($_dubbingMinutesRemaining mins balance)")),
+            SnackBar(content: Text("✅ Synced $name to Firebase Cloud ($_dubbingMinutesRemaining mins)")),
           );
         }
       },
@@ -8793,7 +8643,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(_signedInUserEmail != null ? Icons.verified_user : Icons.account_circle_outlined, color: Colors.amberAccent, size: 12),
+            Icon(_signedInUserEmail != null ? Icons.cloud_done_rounded : Icons.cloud_off_rounded, color: Colors.amberAccent, size: 12),
             const SizedBox(width: 4),
             Text(label, style: const TextStyle(color: Colors.amberAccent, fontSize: 10, fontWeight: FontWeight.bold)),
           ],
@@ -8806,26 +8656,33 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     if (_userSubscriptionTier != "free") return const SizedBox.shrink();
     return Container(
       width: double.infinity,
-      height: 52,
+      height: 54,
       decoration: const BoxDecoration(
         color: Color(0xFF121212),
         border: Border(top: BorderSide(color: Colors.white12, width: 0.8)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 6),
       child: Row(
         children: [
-          const Icon(Icons.campaign_rounded, color: Colors.amberAccent, size: 16),
-          const SizedBox(width: 6),
           Expanded(
-            child: Text(
-              _activeAdProvider == "admob"
-                  ? "AdMob Test Banner (320x50)"
-                  : (_activeAdProvider == "startio"
-                      ? "Start.io Ad (#$_startIoAppId)"
-                      : "AdMob / Start.io (#$_startIoAppId)"),
-              style: const TextStyle(color: Colors.white70, fontSize: 10.5),
-              overflow: TextOverflow.ellipsis,
-            ),
+            child: (_isAdMobBannerLoaded && _adMobBanner != null)
+                ? SizedBox(
+                    height: 50,
+                    child: AdWidget(ad: _adMobBanner!),
+                  )
+                : const Row(
+                    children: [
+                      Icon(Icons.ads_click_rounded, color: Colors.amberAccent, size: 15),
+                      SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          "Google AdMob Test Banner (320x50)",
+                          style: TextStyle(color: Colors.white70, fontSize: 10.5),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
           ),
           TextButton(
             style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6)),

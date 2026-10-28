@@ -8621,6 +8621,260 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     );
   }
 
+  Future<bool> _verifyCloudPaymentEntitlement(String requestedTier) async {
+    if (_firebaseUid == null || _firebaseIdToken == null) return false;
+    await _refreshFirebaseTokenIfNeeded();
+    final cloudAcc = await _firebaseFetchCloudQuota();
+    if (cloudAcc == null) return false;
+
+    final String cloudTier = (cloudAcc['tier'] ?? 'free').toString();
+    final int cloudMins = (cloudAcc['mins'] is int)
+        ? cloudAcc['mins'] as int
+        : (int.tryParse(cloudAcc['mins']?.toString() ?? '0') ?? 0);
+
+    if (cloudTier == requestedTier || (requestedTier == "creator_8" && cloudTier == "pro_20")) {
+      if (mounted) {
+        setState(() {
+          _userSubscriptionTier = cloudTier;
+          _dubbingMinutesRemaining = cloudMins;
+          _selectedDubExportResolution = cloudTier == 'pro_20' ? '4K' : '1080p';
+        });
+      }
+      await _saveAccountState();
+      return true;
+    }
+    return false;
+  }
+
+  Future<String?> _redeemFirebaseCloudLicenseKey(String rawKey, String targetTier) async {
+    final String cleanKey = rawKey.trim().toUpperCase().replaceAll(RegExp(r'[^A-Z0-9_-]'), '');
+    if (cleanKey.length < 5) {
+      return "❌ Please enter a valid activation code.";
+    }
+    if (_firebaseUid == null || _firebaseIdToken == null) {
+      return "❌ Please sign in to your Studio Cloud account first.";
+    }
+
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+    try {
+      final uri = Uri.parse("$_firebaseDbUrl/pms_license_keys/$cleanKey.json?auth=$_firebaseIdToken");
+      final req = await client.getUrl(uri);
+      final res = await req.close().timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200) {
+        return "❌ Could not verify code with Firebase Cloud.";
+      }
+      final body = await res.transform(utf8.decoder).join();
+      final decoded = jsonDecode(body);
+      if (decoded is! Map<String, dynamic>) {
+        return "❌ Invalid or expired activation code.";
+      }
+      if (decoded['used'] == true) {
+        return "❌ This activation code has already been used.";
+      }
+
+      final String grantedTier = (decoded['tier'] ?? targetTier).toString();
+      final int grantedMins = (decoded['mins'] is int)
+          ? decoded['mins'] as int
+          : (grantedTier == 'pro_20' ? 250 : 60);
+
+      final markUri = Uri.parse("$_firebaseDbUrl/pms_license_keys/$cleanKey.json?auth=$_firebaseIdToken");
+      final markReq = await client.patchUrl(markUri);
+      markReq.headers.set(HttpHeaders.contentTypeHeader, "application/json; charset=utf-8");
+      markReq.add(utf8.encode(jsonEncode({
+        'used': true,
+        'usedByUid': _firebaseUid,
+        'usedByEmail': _signedInUserEmail,
+        'usedAt': DateTime.now().toIso8601String(),
+      })));
+      await markReq.close().timeout(const Duration(seconds: 8));
+
+      setState(() {
+        _userSubscriptionTier = grantedTier;
+        _dubbingMinutesRemaining += grantedMins;
+        _selectedDubExportResolution = grantedTier == 'pro_20' ? '4K' : '1080p';
+      });
+      await _saveAccountState();
+      return null;
+    } catch (_) {
+      return "❌ Network error while contacting Firebase Cloud.";
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> _showProtectedCheckoutModal(String planName, String tierId, Color color) async {
+    final TextEditingController keyCtrl = TextEditingController();
+    bool isChecking = false;
+    String? statusError;
+    final String priceLabel = tierId == "pro_20" ? "€20.00 / month" : "€8.00 / month";
+    final String skuId = tierId == "pro_20" ? "pro_studio_20" : "creator_pass_8";
+    final int includedMins = tierId == "pro_20" ? 250 : 60;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setCheckoutState) => AlertDialog(
+          backgroundColor: const Color(0xFF161616),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: color, width: 1.2),
+          ),
+          title: Row(
+            children: [
+              Icon(Icons.verified_user_rounded, color: color, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  "Subscribe to $planName",
+                  style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 15.5),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF101010),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text("Plan: $planName ($priceLabel)", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12.5)),
+                      const SizedBox(height: 4),
+                      Text("Includes: +$includedMins Dubbing Mins/mo • Google Play SKU: $skuId", style: const TextStyle(color: Colors.tealAccent, fontSize: 11)),
+                      const SizedBox(height: 4),
+                      Text("Account: ${_signedInUserEmail ?? 'Not signed in'}", style: const TextStyle(color: Colors.white60, fontSize: 11)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (statusError != null)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(8),
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.redAccent),
+                    ),
+                    child: Text(
+                      statusError!,
+                      style: const TextStyle(color: Colors.redAccent, fontSize: 11.5, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: color,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                    ),
+                    icon: const Icon(Icons.shop_two_rounded, size: 18),
+                    label: Text(
+                      isChecking ? "Checking Google Play & Cloud..." : "Pay $priceLabel via Google Play",
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
+                    onPressed: isChecking
+                        ? null
+                        : () async {
+                            setCheckoutState(() {
+                              isChecking = true;
+                              statusError = null;
+                            });
+                            final unlocked = await _verifyCloudPaymentEntitlement(tierId);
+                            if (unlocked) {
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text("🎉 Verified $planName on Firebase Cloud!")),
+                                );
+                              }
+                            } else {
+                              setCheckoutState(() {
+                                isChecking = false;
+                                statusError = "🔒 No active '$skuId' Google Play subscription found for $_signedInUserEmail yet. If you have a single-use Cloud Activation Key, redeem it below.";
+                              });
+                            }
+                          },
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Divider(color: Colors.white24, height: 1),
+                const SizedBox(height: 12),
+                const Text(
+                  "🔑 Have a Cloud License / Activation Code?",
+                  style: TextStyle(color: Colors.amberAccent, fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: keyCtrl,
+                  textCapitalization: TextCapitalization.characters,
+                  style: const TextStyle(color: Colors.white, fontSize: 12.5, letterSpacing: 1.1),
+                  decoration: InputDecoration(
+                    hintText: "Enter Single-Use Cloud Key (e.g. PRO20-XXXX)",
+                    hintStyle: const TextStyle(color: Colors.white38, fontSize: 11),
+                    filled: true,
+                    fillColor: const Color(0xFF101010),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.amberAccent)),
+                    icon: const Icon(Icons.vpn_key_rounded, color: Colors.amberAccent, size: 16),
+                    label: const Text("Redeem Cloud Key", style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                    onPressed: isChecking
+                        ? null
+                        : () async {
+                            setCheckoutState(() {
+                              isChecking = true;
+                              statusError = null;
+                            });
+                            final err = await _redeemFirebaseCloudLicenseKey(keyCtrl.text, tierId);
+                            if (err == null) {
+                              if (ctx.mounted) Navigator.pop(ctx);
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text("🎉 Cloud Key Redeemed! Activated $planName ($_dubbingMinutesRemaining mins)")),
+                                );
+                              }
+                            } else {
+                              setCheckoutState(() {
+                                isChecking = false;
+                                statusError = err;
+                              });
+                            }
+                          },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Close", style: TextStyle(color: Colors.white54)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildPlanTile(String name, String desc, String tierId, Color color) {
     final bool isSelected = _userSubscriptionTier == tierId;
     return InkWell(
@@ -8629,55 +8883,20 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           final ok = await _promptAccountSignIn();
           if (!ok) return;
         }
-        if (tierId != "free") {
-          // In production, this launches Google Play Billing. For testing, it verifies cloud entitlement.
-          bool confirmedPayment = false;
-          await showDialog(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              backgroundColor: const Color(0xFF1A1A1A),
-              title: Text("💎 Subscribe to $name", style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16)),
-              content: Text(
-                "This will initiate a secure Google Play billing transaction for $name.
-
-(For testing purposes, tap 'Simulate Google Play Purchase' below to activate instantly).",
-                style: const TextStyle(color: Colors.white70, fontSize: 12.5),
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel", style: TextStyle(color: Colors.white54))),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: color, foregroundColor: Colors.black),
-                  onPressed: () {
-                    confirmedPayment = true;
-                    Navigator.pop(ctx);
-                  },
-                  child: const Text("Simulate Google Play Purchase", style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ],
-            ),
-          );
-          if (!confirmedPayment) return;
-        }
-        setState(() {
-          _userSubscriptionTier = tierId;
-          if (tierId == "free") {
-            _dubbingMinutesRemaining = 0;
-            _selectedDubExportResolution = "720p";
-          } else if (tierId == "creator_8") {
-            _dubbingMinutesRemaining = 60;
-            _selectedDubExportResolution = "1080p";
-          } else if (tierId == "pro_20") {
-            _dubbingMinutesRemaining = 250;
-            _selectedDubExportResolution = "4K";
-          }
-        });
-        await _saveAccountState();
-        if (mounted) Navigator.pop(context);
-        if (mounted) {
+        if (isSelected) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("✅ Securely verified & synced $name to Firebase Cloud!")),
+            SnackBar(content: Text("ℹ️ You are already on $name.")),
           );
+          return;
         }
+        if (tierId == "free") {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("ℹ️ Paid plans remain active until your monthly billing cycle ends.")),
+          );
+          return;
+        }
+        if (mounted) Navigator.pop(context);
+        await _showProtectedCheckoutModal(name, tierId, color);
       },
       child: Container(
         padding: const EdgeInsets.all(10),
@@ -8693,7 +8912,14 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(name, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13.5)),
-                if (isSelected) Icon(Icons.check_circle, color: color, size: 16),
+                if (isSelected)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(color: color.withOpacity(0.2), borderRadius: BorderRadius.circular(4)),
+                    child: Text("ACTIVE", style: TextStyle(color: color, fontSize: 9.5, fontWeight: FontWeight.bold)),
+                  )
+                else
+                  Icon(Icons.lock_outline_rounded, color: color.withOpacity(0.8), size: 15),
               ],
             ),
             const SizedBox(height: 4),

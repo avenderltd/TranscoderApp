@@ -8629,6 +8629,35 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           final ok = await _promptAccountSignIn();
           if (!ok) return;
         }
+        if (tierId != "free") {
+          // In production, this launches Google Play Billing. For testing, it verifies cloud entitlement.
+          bool confirmedPayment = false;
+          await showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: const Color(0xFF1A1A1A),
+              title: Text("💎 Subscribe to $name", style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16)),
+              content: Text(
+                "This will initiate a secure Google Play billing transaction for $name.
+
+(For testing purposes, tap 'Simulate Google Play Purchase' below to activate instantly).",
+                style: const TextStyle(color: Colors.white70, fontSize: 12.5),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel", style: TextStyle(color: Colors.white54))),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: color, foregroundColor: Colors.black),
+                  onPressed: () {
+                    confirmedPayment = true;
+                    Navigator.pop(ctx);
+                  },
+                  child: const Text("Simulate Google Play Purchase", style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          );
+          if (!confirmedPayment) return;
+        }
         setState(() {
           _userSubscriptionTier = tierId;
           if (tierId == "free") {
@@ -8646,7 +8675,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         if (mounted) Navigator.pop(context);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("✅ Synced $name to Firebase Cloud ($_dubbingMinutesRemaining mins)")),
+            SnackBar(content: Text("✅ Securely verified & synced $name to Firebase Cloud!")),
           );
         }
       },

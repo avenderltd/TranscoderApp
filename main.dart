@@ -2323,9 +2323,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         presenceDb = 4.8;
         break;
       case 'airplane_offline':
-        pitch = voiceGender == 'male' ? 0.76 : 0.95;
-        tempo = 0.96;
-        chestDb = 4.0;
+        pitch = voiceGender == 'male' ? 0.92 : 1.02;
+        tempo = 1.02;
+        chestDb = 2.5;
         presenceDb = 2.5;
         break;
     }
@@ -2575,7 +2575,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             '${tempDir.path}/offline_tts_${uniqueTs}_$segmentIndex.wav';
         await _bindBestSystemNeuralVoice(cleanLang, voiceGender);
         await _flutterTts.setPitch(1.0);
-        await _flutterTts.setSpeechRate(0.51);
+        await _flutterTts.setSpeechRate(0.92);cameFromPrePitchedStudioEngine = true;
         await _flutterTts.awaitSynthCompletion(true);
 
         await _flutterTts
@@ -2636,8 +2636,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         presenceDb = kokoroMod['presenceDb'] ?? 4.6;
       }
 
-      if (cameFromPrePitchedStudioEngine &&
-          activeEngine == "steerable_emotion") {
+      if (cameFromPrePitchedStudioEngine) {
         pitchRatio = 1.0;
       }
 
@@ -4896,6 +4895,21 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   // ============================================================================
   bool _offlineFastSkipTts = false;
 
+  bool _lineNeedsTargetScriptTranslation(String text, String original, String normalizedTarget) {
+    final String t = text.trim();
+    final String o = original.trim();
+    if (t.isEmpty) return true;
+    if (t.toLowerCase() == o.toLowerCase() && RegExp(r'[a-zA-Z]{3,}').hasMatch(o)) {
+      return true;
+    }
+    if ((normalizedTarget == 'ar' || normalizedTarget == 'fa' || normalizedTarget == 'ur') &&
+        !RegExp(r'[\u0600-\u06FF]').hasMatch(t) &&
+        RegExp(r'[a-zA-Z]{3,}').hasMatch(o)) {
+      return true;
+    }
+    return false;
+  }
+
   Future<List<String>> _translateBatchLines(
       List<String> lines, String targetLang) async {
     _offlineFastSkipTts = false;
@@ -4905,30 +4919,49 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         : targetLang.split('-').first.toLowerCase();
     final List<String> results = List<String>.from(lines);
 
+    if (normalizedTarget == "en") {
+      return results;
+    }
+
     bool anyOnlineRequestSucceeded = false;
-    const int batchSize = 8;
+    // Larger batch size (24 lines per request) so a 1h45m movie only takes ~40 requests instead of 150+
+    const int batchSize = 24;
+    const List<String> clients = ['gtx', 'dict-chrome-ex'];
 
     for (int start = 0; start < lines.length; start += batchSize) {
       final int end =
           (start + batchSize < lines.length) ? start + batchSize : lines.length;
       final List<String> chunk = lines.sublist(start, end);
-      final String joinedPayload =
-          chunk.map((s) => s.replaceAll('\n', ' ').trim()).join('\n');
+
+      if (mounted && lines.length > 30) {
+        setState(() {
+          _statusMessage =
+              "Step 3/5: Translating dialogue (${end}/${lines.length}) to ${normalizedTarget.toUpperCase()}...";
+        });
+      }
+
+      // Join with indexed markers so Google Translate never merges or drops line breaks in long movies
+      final String joinedPayload = List.generate(
+        chunk.length,
+        (idx) => "[${idx + 1}] ${chunk[idx].replaceAll('\n', ' ').trim()}",
+      ).join('\n');
 
       bool batchHttpOk = false;
-      for (int attempt = 0; attempt < 2; attempt++) {
+      for (int attempt = 0; attempt < 3; attempt++) {
+        final String clientParam = clients[attempt % clients.length];
         try {
           final uri =
               Uri.https('translate.googleapis.com', '/translate_a/single', {
-            'client': 'gtx',
+            'client': clientParam,
             'sl': 'auto',
             'tl': normalizedTarget,
             'dt': 't',
             'q': joinedPayload,
           });
           final response = await http.get(uri, headers: {
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 14)',
-          }).timeout(const Duration(seconds: 2));
+            'User-Agent':
+                'Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+          }).timeout(const Duration(seconds: 6));
 
           if (response.statusCode == 200) {
             anyOnlineRequestSucceeded = true;
@@ -4940,28 +4973,35 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             }
             final List<String> splitLines =
                 fullTranslated.toString().split('\n');
+
             if (splitLines.length == chunk.length) {
               for (int j = 0; j < chunk.length; j++) {
-                results[start + j] = splitLines[j].trim();
+                final String cleaned = splitLines[j]
+                    .replaceFirst(RegExp(r'^\s*[\[\(]?\d+[\]\)\.]?\s*'), '')
+                    .trim();
+                if (cleaned.isNotEmpty) {
+                  results[start + j] = cleaned;
+                }
               }
               batchHttpOk = true;
               break;
             }
           }
         } catch (_) {}
-        await Future.delayed(Duration(milliseconds: 100 * (attempt + 1)));
+        await Future.delayed(Duration(milliseconds: 250 * (attempt + 1)));
       }
 
-      if (!batchHttpOk && !anyOnlineRequestSucceeded) {
-        break;
+      // Gentle pacing between batches so 1h45m+ movies never trigger HTTP 429 rate-limits
+      if (lines.length > 40) {
+        await Future.delayed(const Duration(milliseconds: 140));
       }
 
+      // Per-line verification inside the chunk: any line still in English is retried individually
       for (int j = 0; j < chunk.length; j++) {
         final String originalLine = chunk[j].trim();
         final String currentResult = results[start + j].trim();
-        if (batchHttpOk &&
-            (currentResult.isEmpty ||
-                currentResult.toLowerCase() == originalLine.toLowerCase())) {
+        if (_lineNeedsTargetScriptTranslation(
+            currentResult, originalLine, normalizedTarget)) {
           final String singleTranslated = await _translateSingleLineWithRetry(
               originalLine, normalizedTarget);
           if (singleTranslated.trim().isNotEmpty &&
@@ -4972,55 +5012,38 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           }
         }
       }
+
+      if (!batchHttpOk && !anyOnlineRequestSucceeded && start >= batchSize) {
+        break;
+      }
+    }
+
+    // Check if ANY lines are still untranslated (e.g. if Google throttled midway through a 2-hour movie)
+    final List<int> untranslatedIndices = [];
+    for (int i = 0; i < lines.length; i++) {
+      if (_lineNeedsTargetScriptTranslation(
+          results[i], lines[i], normalizedTarget)) {
+        untranslatedIndices.add(i);
+      }
     }
 
     final TranslateLanguage? targetMl = _mapToMlKitLang(normalizedTarget);
 
-    if (anyOnlineRequestSucceeded) {
-      _offlineFastSkipTts = false;
-      Future(() async {
-        try {
-          final modelManager = OnDeviceTranslatorModelManager();
-          final List<String> warmLangs = [
-            TranslateLanguage.english.bcpCode,
-            TranslateLanguage.german.bcpCode,
-            TranslateLanguage.arabic.bcpCode,
-            TranslateLanguage.french.bcpCode,
-            TranslateLanguage.spanish.bcpCode,
-            if (targetMl != null) targetMl.bcpCode,
-          ];
-          for (final code in warmLangs.toSet()) {
-            if (!await modelManager.isModelDownloaded(code)) {
-              await modelManager.downloadModel(code, isWifiRequired: false);
-            }
-          }
-        } catch (_) {}
-      });
-      return results;
-    }
-
-    // Device is offline: tell Step 4 TTS to skip all online HTTP timeouts immediately!
-    _offlineFastSkipTts = true;
-
-    // If target is English, Whisper's C++ engine (isTranslate: true) ALREADY
-    // translated any of the 99 languages into English in Step 2 — return in 0ms!
-    if (normalizedTarget == "en") {
-      return results;
-    }
-
-    // OFFLINE ENGINE 1: Fast On-Device ML Kit (~1-2 seconds for all 158 lines)
-    bool offlineTranslated = false;
-    if (targetMl != null) {
+    // Always run on-device ML Kit on any remaining untranslated lines so 100% of a 1h45m video is translated!
+    if (untranslatedIndices.isNotEmpty && targetMl != null) {
       try {
         final TranslateLanguage sourceMl =
             _detectUniversalSourceMlKitLanguage(lines, targetMl);
         final modelManager = OnDeviceTranslatorModelManager();
 
         TranslateLanguage effectiveSource = sourceMl;
-        if (!await modelManager.isModelDownloaded(effectiveSource.bcpCode) &&
-            await modelManager.isModelDownloaded(
-                TranslateLanguage.english.bcpCode)) {
-          effectiveSource = TranslateLanguage.english;
+        if (!await modelManager.isModelDownloaded(effectiveSource.bcpCode)) {
+          await modelManager.downloadModel(effectiveSource.bcpCode,
+              isWifiRequired: false);
+        }
+        if (!await modelManager.isModelDownloaded(targetMl.bcpCode)) {
+          await modelManager.downloadModel(targetMl.bcpCode,
+              isWifiRequired: false);
         }
 
         if (effectiveSource != targetMl &&
@@ -5030,12 +5053,11 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             sourceLanguage: effectiveSource,
             targetLanguage: targetMl,
           );
-          for (int i = 0; i < lines.length; i++) {
+          for (final idx in untranslatedIndices) {
             final String translated =
-                await onDeviceTranslator.translateText(lines[i]);
+                await onDeviceTranslator.translateText(lines[idx]);
             if (translated.trim().isNotEmpty) {
-              results[i] = translated.trim();
-              offlineTranslated = true;
+              results[idx] = translated.trim();
             }
           }
           await onDeviceTranslator.close();
@@ -5043,71 +5065,12 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       } catch (_) {}
     }
 
-    // OFFLINE ENGINE 2: Multi-line batched GGUF fallback (loads once per 12 lines instead of 158x)
-    if (!offlineTranslated &&
-        _loadedGgufModel != null &&
-        await _loadedGgufModel!.exists()) {
-      const int ggufBatch = 12;
-      for (int start = 0; start < lines.length; start += ggufBatch) {
-        final int end = (start + ggufBatch < lines.length)
-            ? start + ggufBatch
-            : lines.length;
-        final List<String> sub = lines.sublist(start, end);
-        final String numberedInput = List.generate(
-            sub.length, (idx) => "${idx + 1}. ${sub[idx].trim()}").join("\n");
-
-        setState(() {
-          _statusMessage =
-              "Step 3/5: Offline GGUF batch-translating ($end/${lines.length}) to $normalizedTarget...";
-        });
-
-        final StringBuffer generatedTokens = StringBuffer();
-        try {
-          final String prompt =
-              "<|im_start|>system\nTranslate each numbered line into language '$normalizedTarget'. Keep the exact same numbering, one line per number.<|im_end|>\n<|im_start|>user\n$numberedInput<|im_end|>\n<|im_start|>assistant\n";
-          const llamaEngine = LibLlamaCpp();
-          final commandStream = Stream<LlamaCommand>.fromIterable([
-            LlamaLoadModelCommand(
-              modelPath: _loadedGgufModel!.path,
-              contextSize: 1024,
-              gpuLayerCount: 0,
-            ),
-            LlamaGenerateCommand(
-              prompt: prompt,
-              maxTokens: 260,
-            ),
-            const LlamaDisposeCommand(),
-          ]);
-
-          await for (final event in llamaEngine
-              .transform(commandStream)
-              .timeout(const Duration(seconds: 25))) {
-            if (event is LlamaTokenResponse) {
-              generatedTokens.write(event.text);
-              if (generatedTokens.toString().contains('<|im_end|>') ||
-                  generatedTokens.toString().contains('<|endoftext|>')) {
-                break;
-              }
-            } else if (event is LlamaDoneResponse ||
-                event is LlamaErrorResponse) {
-              break;
-            }
-          }
-          final List<String> outLines = generatedTokens
-              .toString()
-              .replaceAll('<|im_end|>', '')
-              .replaceAll('<|endoftext|>', '')
-              .split('\n')
-              .map((s) => s.replaceFirst(RegExp(r'^\d+[\.\)\-]\s*'), '').trim())
-              .where((s) => s.isNotEmpty)
-              .toList();
-          for (int k = 0; k < sub.length && k < outLines.length; k++) {
-            results[start + k] = outLines[k];
-          }
-        } catch (_) {}
-      }
+    if (anyOnlineRequestSucceeded) {
+      _offlineFastSkipTts = false;
+      return results;
     }
 
+    _offlineFastSkipTts = true;
     return results;
   }
 
@@ -6016,7 +5979,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           final int gap = sStart - prev.endMs;
           final int combinedDuration = sEnd - prev.startMs;
           if (gap <= 300 &&
-              combinedDuration <= 7500 &&
+              combinedDuration <= 4800 &&
               !prev.text.endsWith('.') &&
               !prev.text.endsWith('?')) {
             prev.endMs = sEnd;

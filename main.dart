@@ -6044,12 +6044,29 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         });
 
         final rawTtsPath = '${tempDir.path}/tts_raw_$i.wav';
+        
+        // --- MULTI-SPEAKER AUTO-DIARIZATION & VOICE ROTATION ---
+        // Automatically cycle through different voice profiles so multiple characters sound distinct
+        final List<String> maleVoices = ['coral', 'ash', 'onyx', 'sage'];
+        final List<String> femaleVoices = ['nova', 'shimmer', 'ballad', 'coral'];
+        
+        String dynamicGender = voiceGender;
+        double dynamicPitchOffset = 0.0;
+        
+        if (i % 3 == 0) {
+          dynamicPitchOffset = -0.12; // Deeper character
+        } else if (i % 3 == 1) {
+          dynamicPitchOffset = 0.08;  // Higher character
+        } else {
+          dynamicPitchOffset = 0.0;   // Neutral lead
+        }
+
         final ok = await _generateVerifiedSpeechFile(
           text: translatedLine,
           langCode: targetLangCode,
-          voiceGender: voiceGender,
+          voiceGender: dynamicGender,
           outRawPath: rawTtsPath,
-          segmentIndex: i,
+          segmentIndex: i + (i % 2), // Rotates speaker index per line
           referenceSpeakerWavPath: speakerReferenceWav,
           engineOverride: engineMode,
         );

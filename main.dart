@@ -5868,7 +5868,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
   // Analyzes the original video's 16kHz mono PCM WAV between [startMs, endMs]
   // to detect the speaker's true vocal cord frequency (F0 in Hz), gender, and character voice ID.
-  Future> _analyzeOriginalSpeakerSegment({
+  Future<Map<String, dynamic>> _analyzeOriginalSpeakerSegment({
     required String originalWavPath,
     required int startMs,
     required int endMs,

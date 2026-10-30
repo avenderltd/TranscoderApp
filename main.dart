@@ -5469,7 +5469,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         subtitle: Text(
                           autoCloneVideoSpeaker
                               ? "Extracts 5s speaker clip, measures Hz, & clones voice"
-                              : "Uses selected studio voice preset ($voiceGender / $_selectedSteerablePersona)",
+                              : "Auto-detects Male/Female per speaker & assigns unique character voices",
                           style: const TextStyle(
                               color: Colors.white60, fontSize: 10.5),
                         ),
@@ -5549,64 +5549,30 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ChoiceChip(
-                            label: const Text("👩 Natural Female"),
-                            selected: voiceGender == "female",
-                            selectedColor:
-                                Colors.tealAccent.withOpacity(0.25),
-                            labelStyle: TextStyle(
-                              color: voiceGender == "female"
-                                  ? Colors.tealAccent
-                                  : Colors.white70,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 11.5,
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+                      decoration: BoxDecoration(
+                        color: Colors.tealAccent.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.tealAccent.withOpacity(0.6)),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.auto_awesome, color: Colors.tealAccent, size: 17),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              "🤖 Auto-Detect Male/Female & Multi-Character Voices (Active)",
+                              style: TextStyle(
+                                color: Colors.tealAccent,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 11.2,
+                              ),
                             ),
-                            onSelected: (_) {
-                              setState(() {
-                                _useCustomCloneOverride = false;
-                                _aiVoiceGender = "female";
-                                if (_selectedSteerablePersona == "ash" ||
-                                    _selectedSteerablePersona == "onyx" ||
-                                    _selectedSteerablePersona == "ballad") {
-                                  _selectedSteerablePersona = "coral";
-                                }
-                              });
-                              setModalState(() => voiceGender = "female");
-                            },
                           ),
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: ChoiceChip(
-                            label: const Text("👨 Natural Male"),
-                            selected: voiceGender == "male",
-                            selectedColor:
-                                Colors.tealAccent.withOpacity(0.25),
-                            labelStyle: TextStyle(
-                              color: voiceGender == "male"
-                                  ? Colors.tealAccent
-                                  : Colors.white70,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 11.5,
-                            ),
-                            onSelected: (_) {
-                              setState(() {
-                                _useCustomCloneOverride = false;
-                                _aiVoiceGender = "male";
-                                if (_selectedSteerablePersona == "coral" ||
-                                    _selectedSteerablePersona == "nova" ||
-                                    _selectedSteerablePersona == "sage") {
-                                  _selectedSteerablePersona = "ash";
-                                }
-                              });
-                              setModalState(() => voiceGender = "male");
-                            },
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 6),
                     Container(
@@ -5900,33 +5866,148 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     });
   }
 
-  Future<String> _detectAudioSegmentGender(String wavPath) async {
+  // Analyzes the original video's 16kHz mono PCM WAV between [startMs, endMs]
+  // to detect the speaker's true vocal cord frequency (F0 in Hz), gender, and character voice ID.
+  Future> _analyzeOriginalSpeakerSegment({
+    required String originalWavPath,
+    required int startMs,
+    required int endMs,
+    required int segmentIndex,
+    required int prevEndMs,
+    required String prevGender,
+    required int prevVariant,
+    required double prevF0,
+  }) async {
     try {
-      final file = File(wavPath);
-      if (!await file.exists()) return 'male';
-      final bytes = await file.readAsBytes();
-      if (bytes.length < 44) return 'male';
-      
-      final pcmBytes = bytes.sublist(44);
-      int zeroCrossings = 0;
-      int totalSamples = pcmBytes.length ~/ 2;
-      if (totalSamples < 100) return 'male';
-
-      int prevSample = 0;
-      for (int i = 0; i < totalSamples; i++) {
-        int sample = pcmBytes[i * 2] | (pcmBytes[i * 2 + 1] << 8);
-        if (sample > 32767) sample -= 65536;
-        
-        if ((prevSample < 0 && sample >= 0) || (prevSample >= 0 && sample < 0)) {
-          zeroCrossings++;
-        }
-        prevSample = sample;
+      final file = File(originalWavPath);
+      if (!await file.exists()) {
+        return {'gender': 'male', 'variant': segmentIndex % 3, 'f0': 130.0, 'pitchShift': 1.0};
+      }
+      final int fileLen = await file.length();
+      // 16kHz, 16-bit mono = 32,000 bytes/sec = 32 bytes/ms
+      final int byteOffset = (44 + (startMs * 32)).clamp(44, fileLen);
+      final int durationMs = (endMs - startMs).clamp(250, 3500);
+      final int bytesToRead = (durationMs * 32).clamp(0, fileLen - byteOffset);
+      if (bytesToRead < 3200) {
+        return {'gender': prevGender, 'variant': prevVariant, 'f0': prevF0, 'pitchShift': 1.0};
       }
 
-      double approxFreq = (zeroCrossings / 2.0) * (16000.0 / totalSamples);
-      return approxFreq > 155.0 ? 'female' : 'male';
+      final raf = await file.open(mode: FileMode.read);
+      await raf.setPosition(byteOffset);
+      final Uint8List rawBytes = await raf.read(bytesToRead);
+      await raf.close();
+
+      final int totalSamples = rawBytes.length ~/ 2;
+      final List<double> samples = List<double>.filled(totalSamples, 0.0);
+      for (int i = 0; i < totalSamples; i++) {
+        int s = rawBytes[i * 2] | (rawBytes[i * 2 + 1] << 8);
+        if (s > 32767) s -= 65536;
+        samples[i] = s / 32768.0;
+      }
+
+      // Simple 3-tap low-pass smoothing to remove high-frequency sibilance ("s"/"sh") before F0 pitch check
+      final List<double> smoothed = List<double>.filled(totalSamples, 0.0);
+      for (int i = 1; i < totalSamples - 1; i++) {
+        smoothed[i] = (samples[i - 1] + 2.0 * samples[i] + samples[i + 1]) * 0.25;
+      }
+
+      // Slice into 30ms frames (480 samples at 16kHz) and measure F0 on voiced frames via autocorrelation
+      const int frameSize = 480;
+      final List<double> frameF0s = [];
+
+      for (int fStart = 0; fStart + frameSize < totalSamples; fStart += frameSize) {
+        double energy = 0.0;
+        int zc = 0;
+        for (int i = fStart; i < fStart + frameSize; i++) {
+          energy += smoothed[i] * smoothed[i];
+          if (i > fStart &&
+              ((smoothed[i - 1] < 0 && smoothed[i] >= 0) ||
+                  (smoothed[i - 1] >= 0 && smoothed[i] < 0))) {
+            zc++;
+          }
+        }
+        final double rms = sqrt(energy / frameSize);
+        // Only analyze voiced vowel frames (sufficient energy, not unvoiced noise)
+        if (rms < 0.025 || zc > 95) continue;
+
+        // Search lag from 57 samples (280 Hz high female) to 190 samples (84 Hz deep male)
+        int bestLag = 0;
+        double maxCorr = -1.0;
+        for (int lag = 57; lag <= 190; lag += 2) {
+          double corr = 0.0;
+          for (int i = 0; i < frameSize - lag; i += 2) {
+            corr += smoothed[fStart + i] * smoothed[fStart + i + lag];
+          }
+          if (corr > maxCorr) {
+            maxCorr = corr;
+            bestLag = lag;
+          }
+        }
+        if (bestLag > 0 && maxCorr > energy * 0.28) {
+          final double f0 = 16000.0 / bestLag;
+          if (f0 >= 80.0 && f0 <= 285.0) {
+            frameF0s.add(f0);
+          }
+        }
+      }
+
+      double medianF0 = prevF0;
+      if (frameF0s.isNotEmpty) {
+        frameF0s.sort();
+        medianF0 = frameF0s[frameF0s.length ~/ 2];
+      }
+
+      // 165 Hz boundary separates adult male (<165 Hz) from adult female (>=165 Hz)
+      final String detectedGender = medianF0 >= 165.0 ? 'female' : 'male';
+
+      // Assign character voice variant (0, 1, or 2) within that gender
+      int variant = 0;
+      if (detectedGender == 'male') {
+        if (medianF0 < 115.0) {
+          variant = 0; // Deep Male #1
+        } else if (medianF0 < 140.0) {
+          variant = 1; // Natural Male #2
+        } else {
+          variant = 2; // Tenor Male #3
+        }
+      } else {
+        if (medianF0 < 198.0) {
+          variant = 0; // Warm Female #1
+        } else if (medianF0 < 230.0) {
+          variant = 1; // Natural Female #2
+        } else {
+          variant = 2; // Bright Female #3
+        }
+      }
+
+      // If two speakers of the same gender talk back-to-back after a conversational pause (>650ms)
+      // or a noticeable pitch jump (>18 Hz), force a different variant so they never sound identical!
+      final int pauseMs = startMs - prevEndMs;
+      if (segmentIndex > 0 &&
+          detectedGender == prevGender &&
+          variant == prevVariant &&
+          (pauseMs > 650 || (medianF0 - prevF0).abs() > 18.0)) {
+        variant = (prevVariant + 1) % 3;
+      }
+
+      // Calculate exact vocal pitch shift multiplier so each character has a distinct voice
+      double pitchShift = 1.0;
+      if (detectedGender == 'male') {
+        const List<double> maleShifts = [0.85, 0.93, 1.01];
+        pitchShift = maleShifts[variant % 3];
+      } else {
+        const List<double> femaleShifts = [0.96, 1.03, 1.10];
+        pitchShift = femaleShifts[variant % 3];
+      }
+
+      return {
+        'gender': detectedGender,
+        'variant': variant,
+        'f0': medianF0,
+        'pitchShift': pitchShift,
+      };
     } catch (_) {
-      return 'male';
+      return {'gender': prevGender, 'variant': (prevVariant + 1) % 3, 'f0': prevF0, 'pitchShift': 1.0};
     }
   }
 
@@ -6056,10 +6137,41 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       final List<String> sequentialWavParts = [];
       int currentTimelineMs = 0;
 
+      String prevDetectedGender = 'male';
+      int prevCharacterVariant = 0;
+      double prevSpeakerF0 = 130.0;
+      int prevSegmentEndMs = 0;
+
       for (int i = 0; i < mergedSegments.length; i++) {
         final seg = mergedSegments[i];
         final String translatedLine = translatedLines[i].trim();
         if (translatedLine.isEmpty) continue;
+
+        // Automatically detect if the speaker in the original video is Male or Female + assign Character #1/#2/#3
+        final Map<String, dynamic> speakerInfo = await _analyzeOriginalSpeakerSegment(
+          originalWavPath: tempWavPath,
+          startMs: seg.startMs,
+          endMs: seg.endMs,
+          segmentIndex: i,
+          prevEndMs: prevSegmentEndMs,
+          prevGender: prevDetectedGender,
+          prevVariant: prevCharacterVariant,
+          prevF0: prevSpeakerF0,
+        );
+
+        final String autoGender = speakerInfo['gender'] as String;
+        final int charVariant = speakerInfo['variant'] as int;
+        final double detectedF0 = speakerInfo['f0'] as double;
+        final double charPitchShift = speakerInfo['pitchShift'] as double;
+
+        prevDetectedGender = autoGender;
+        prevCharacterVariant = charVariant;
+        prevSpeakerF0 = detectedF0;
+        prevSegmentEndMs = seg.endMs;
+
+        final String speakerTag = autoGender == 'female'
+            ? "👩 Female #${charVariant + 1} (${detectedF0.round()}Hz)"
+            : "👨 Male #${charVariant + 1} (${detectedF0.round()}Hz)";
 
         srtBuffer.writeln('${i + 1}');
         srtBuffer.writeln(
@@ -6070,33 +6182,16 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
         setState(() {
           _statusMessage =
-              "Step 4/5: Synthesizing studio voice (${i + 1}/${mergedSegments.length}) on $_hardwareTierBadge...";
+              "Step 4/5: Auto-Dubbing [$speakerTag] (${i + 1}/${mergedSegments.length})...";
         });
 
         final rawTtsPath = '${tempDir.path}/tts_raw_$i.wav';
-        
-        // --- MULTI-SPEAKER AUTO-DIARIZATION & VOICE ROTATION ---
-        // Automatically cycle through different voice profiles so multiple characters sound distinct
-        final List<String> maleVoices = ['coral', 'ash', 'onyx', 'sage'];
-        final List<String> femaleVoices = ['nova', 'shimmer', 'ballad', 'coral'];
-        
-        String dynamicGender = voiceGender;
-        double dynamicPitchOffset = 0.0;
-        
-        if (i % 3 == 0) {
-          dynamicPitchOffset = -0.12; // Deeper character
-        } else if (i % 3 == 1) {
-          dynamicPitchOffset = 0.08;  // Higher character
-        } else {
-          dynamicPitchOffset = 0.0;   // Neutral lead
-        }
-
         final ok = await _generateVerifiedSpeechFile(
           text: translatedLine,
           langCode: targetLangCode,
-          voiceGender: dynamicGender,
+          voiceGender: autoGender,
           outRawPath: rawTtsPath,
-          segmentIndex: i + (i % 2), // Rotates speaker index per line
+          segmentIndex: charVariant,
           referenceSpeakerWavPath: speakerReferenceWav,
           engineOverride: engineMode,
         );
@@ -6137,8 +6232,15 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           targetTempo = (rawTtsSec / targetSlotSec).clamp(1.01, 1.72);
         }
 
+        // Apply distinct character vocal pitch shift while compensating atempo so speed remains 100% natural!
+        final int charSampleRate = (24000 * charPitchShift).round();
+        final double compensatedTempo = (targetTempo / charPitchShift).clamp(0.65, 1.85);
+        final String eqBoost = autoGender == 'male'
+            ? 'equalizer=f=145:width_type=o:width=2:g=2.8'
+            : 'equalizer=f=280:width_type=o:width=2:g=1.8';
+
         final String filterChain =
-            'aresample=24000,atempo=${targetTempo.toStringAsFixed(2)},volume=1.45';
+            'aresample=24000,asetrate=$charSampleRate,aresample=24000,atempo=${compensatedTempo.toStringAsFixed(3)},$eqBoost,volume=1.45';
 
         final segWavPath = '${tempDir.path}/seq_voice_$i.wav';
         final voiceSess = await FFmpegKit.execute(

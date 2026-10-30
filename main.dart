@@ -5900,6 +5900,36 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     });
   }
 
+  Future<String> _detectAudioSegmentGender(String wavPath) async {
+    try {
+      final file = File(wavPath);
+      if (!await file.exists()) return 'male';
+      final bytes = await file.readAsBytes();
+      if (bytes.length < 44) return 'male';
+      
+      final pcmBytes = bytes.sublist(44);
+      int zeroCrossings = 0;
+      int totalSamples = pcmBytes.length ~/ 2;
+      if (totalSamples < 100) return 'male';
+
+      int prevSample = 0;
+      for (int i = 0; i < totalSamples; i++) {
+        int sample = pcmBytes[i * 2] | (pcmBytes[i * 2 + 1] << 8);
+        if (sample > 32767) sample -= 65536;
+        
+        if ((prevSample < 0 && sample >= 0) || (prevSample >= 0 && sample < 0)) {
+          zeroCrossings++;
+        }
+        prevSample = sample;
+      }
+
+      double approxFreq = (zeroCrossings / 2.0) * (16000.0 / totalSamples);
+      return approxFreq > 155.0 ? 'female' : 'male';
+    } catch (_) {
+      return 'male';
+    }
+  }
+
   Future<void> _handleAiAutoDubbing({required bool alsoBurnSubtitles}) async {
     final dubChoice = await _showDubbingOptionsDialog();
     if (dubChoice == null) return;

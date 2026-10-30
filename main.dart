@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter/services.dart';
 // ============================================================================
 // FILE: main.dart — PART 1 OF 3 (COMPLETE • LINE-BY-LINE VERIFIED)
@@ -5926,9 +5927,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             zc++;
           }
         }
-        final double rms = sqrt(energy / frameSize);
+        final double rms = energy / frameSize;
         // Only analyze voiced vowel frames (sufficient energy, not unvoiced noise)
-        if (rms < 0.025 || zc > 95) continue;
+        if (rms < 0.000625 || zc > 95) continue;
 
         // Search lag from 57 samples (280 Hz high female) to 190 samples (84 Hz deep male)
         int bestLag = 0;

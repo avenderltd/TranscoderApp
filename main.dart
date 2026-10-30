@@ -2636,7 +2636,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         presenceDb = kokoroMod['presenceDb'] ?? 4.6;
       }
 
-      if (cameFromPrePitchedStudioEngine) {
+      if (cameFromPrePitchedStudioEngine || segmentIndex <= 2) {
         pitchRatio = 1.0;
       }
 
@@ -5993,10 +5993,10 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       // Calculate exact vocal pitch shift multiplier so each character has a distinct voice
       double pitchShift = 1.0;
       if (detectedGender == 'male') {
-        const List<double> maleShifts = [0.85, 0.93, 1.01];
+        const List<double> maleShifts = [0.89, 0.95, 1.01];
         pitchShift = maleShifts[variant % 3];
       } else {
-        const List<double> femaleShifts = [0.96, 1.03, 1.10];
+        const List<double> femaleShifts = [0.98, 1.03, 1.08];
         pitchShift = femaleShifts[variant % 3];
       }
 
@@ -6008,6 +6008,40 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       };
     } catch (_) {
       return {'gender': prevGender, 'variant': (prevVariant + 1) % 3, 'f0': prevF0, 'pitchShift': 1.0};
+    }
+  }
+
+  // Writes a valid 24kHz 16-bit mono silent WAV file in <1ms without spawning FFmpeg
+  Future<bool> _writeFastSilentWav24k(String path, double durationSec) async {
+    try {
+      final int numSamples = (durationSec * 24000).round().clamp(1, 24000 * 60);
+      final int dataSize = numSamples * 2;
+      final int totalSize = 36 + dataSize;
+      final ByteData header = ByteData(44);
+      // "RIFF"
+      header.setUint8(0, 0x52); header.setUint8(1, 0x49); header.setUint8(2, 0x46); header.setUint8(3, 0x46);
+      header.setUint32(4, totalSize, Endian.little);
+      // "WAVEfmt "
+      header.setUint8(8, 0x57); header.setUint8(9, 0x41); header.setUint8(10, 0x56); header.setUint8(11, 0x45);
+      header.setUint8(12, 0x66); header.setUint8(13, 0x6D); header.setUint8(14, 0x74); header.setUint8(15, 0x20);
+      header.setUint32(16, 16, Endian.little); // PCM chunk size
+      header.setUint16(20, 1, Endian.little);  // AudioFormat = 1 (PCM)
+      header.setUint16(22, 1, Endian.little);  // NumChannels = 1 (Mono)
+      header.setUint32(24, 24000, Endian.little); // SampleRate = 24000
+      header.setUint32(28, 48000, Endian.little); // ByteRate = 24000 * 2
+      header.setUint16(32, 2, Endian.little);  // BlockAlign = 2
+      header.setUint16(34, 16, Endian.little); // BitsPerSample = 16
+      // "data"
+      header.setUint8(36, 0x64); header.setUint8(37, 0x61); header.setUint8(38, 0x74); header.setUint8(39, 0x61);
+      header.setUint32(40, dataSize, Endian.little);
+
+      final BytesBuilder builder = BytesBuilder(copy: false);
+      builder.add(header.buffer.asUint8List());
+      builder.add(Uint8List(dataSize)); // Zero-filled PCM silence
+      await File(path).writeAsBytes(builder.takeBytes(), flush: true);
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -6185,6 +6219,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               "Step 4/5: Auto-Dubbing [$speakerTag] (${i + 1}/${mergedSegments.length})...";
         });
 
+        if (mergedSegments.length > 80 && i > 0 && i % 4 == 0) {
+          await Future.delayed(const Duration(milliseconds: 65));
+        }
         final rawTtsPath = '${tempDir.path}/tts_raw_$i.wav';
         final ok = await _generateVerifiedSpeechFile(
           text: translatedLine,
@@ -6206,11 +6243,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           final double gapSec = (segStartMs - currentTimelineMs) / 1000.0;
           if (gapSec >= 0.04) {
             final gapWavPath = '${tempDir.path}/seq_gap_$i.wav';
-            final gapSess = await FFmpegKit.execute(
-              '-y -f lavfi -i anullsrc=r=24000:cl=mono -t ${gapSec.toStringAsFixed(3)} -ar 24000 -ac 1 -c:a pcm_s16le "$gapWavPath"',
-            );
-            if (ReturnCode.isSuccess(await gapSess.getReturnCode()) &&
-                await File(gapWavPath).exists()) {
+            if (await _writeFastSilentWav24k(gapWavPath, gapSec)) {
               sequentialWavParts.add(gapWavPath);
               currentTimelineMs = segStartMs;
             }

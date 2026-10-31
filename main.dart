@@ -3843,21 +3843,65 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       }
 
       final List<_DubSegment> mergedSegments = [];
-      for (final s in rawCleanedSegments) {
+      String lastNormalizedSegText = "";
+      int consecutiveRepeatCount = 0;
+
+      for (final s in rawSegments) {
+        // 1. Strip bracketed non-speech tags like [Music], (Applause), *sigh*
+        String clean = s.text
+            .replaceAll(RegExp(r'\[.*?\]|\(.*?\)|\*.*?\*'), ' ')
+            .replaceAll(RegExp(r'\s+'), ' ')
+            .trim();
+        if (clean.isEmpty) continue;
+
+        // 2. Collapse internal 1-4 word stutter loops inside a single segment
+        // e.g. "let's go let's go let's go let's go" -> "let's go"
+        clean = clean.replaceAllMapped(
+          RegExp(r'\b(\w+(?:\s+\w+){0,3})(?:[,\s]+\1\b){2,}', caseSensitive: false),
+          (m) => m.group(1) ?? '',
+        ).trim();
+
+        // 3. Skip pure punctuation or common Whisper music/silence hallucinations
+        final String norm = clean.toLowerCase().replaceAll(RegExp(r'[^a-z0-9\u0600-\u06FF\s]'), '').trim();
+        if (norm.isEmpty) continue;
+        if (norm.contains('subtitles by') ||
+            norm.contains('amaraorg') ||
+            norm == 'you' ||
+            norm == 'thank you for watching') {
+          continue;
+        }
+
+        final int sStart = s.fromTs.inMilliseconds;
+        final int sEnd = s.toTs.inMilliseconds;
+
+        // 4. Break multi-minute Whisper repetition loops (e.g. stuck saying 2 words for 11 mins)
+        if (norm == lastNormalizedSegText) {
+          consecutiveRepeatCount++;
+          // If it's a short 1-4 word phrase repeating back-to-back, drop the loop!
+          final int wordCount = norm.split(RegExp(r'\s+')).length;
+          if (wordCount <= 4 || consecutiveRepeatCount >= 1) {
+            continue;
+          }
+        } else {
+          lastNormalizedSegText = norm;
+          consecutiveRepeatCount = 0;
+        }
+
         if (mergedSegments.isNotEmpty) {
           final prev = mergedSegments.last;
-          final int gap = s.startMs - prev.endMs;
-          final int combinedDuration = s.endMs - prev.startMs;
+          final int gap = sStart - prev.endMs;
+          final int combinedDuration = sEnd - prev.startMs;
           if (gap <= 300 &&
               combinedDuration <= 4800 &&
               !prev.text.endsWith('.') &&
               !prev.text.endsWith('?')) {
-            prev.endMs = s.endMs;
-            prev.text = "${prev.text} ${s.text}";
+            prev.endMs = sEnd;
+            prev.text = "${prev.text} $clean";
             continue;
           }
         }
-        mergedSegments.add(s);
+        mergedSegments.add(
+            _DubSegment(startMs: sStart, endMs: sEnd, text: clean));
       }
 
       String? speakerReferenceWav =

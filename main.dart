@@ -5180,7 +5180,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       final tempWavPath = '${tempDir.path}/whisper_jumpcut.wav';
 
       final wavCmd =
-          '-y -i "${_inputFile!.path}" -vn -af "highpass=f=90,lowpass=f=7600,dynaudnorm=f=150:g=11" -ar 16000 -ac 1 -c:a pcm_s16le "$tempWavPath"';
+          '-y -i "${_inputFile!.path}" -vn -af "pan=mono|c0=0.5*c0+0.5*c1,highpass=f=110,lowpass=f=3900,afftdn=nf=-24" -ar 16000 -ac 1 -c:a pcm_s16le "$tempWavPath"';
       final wavSession = await FFmpegKit.execute(wavCmd);
       if (!ReturnCode.isSuccess(await wavSession.getReturnCode())) {
         setState(() {
@@ -5869,6 +5869,128 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
   // Analyzes the original video's 16kHz mono PCM WAV between [startMs, endMs]
   // to detect the speaker's true vocal cord frequency (F0 in Hz), gender, and character voice ID.
+  String _collapseRepeatedWordsAndPhrases(String input) {
+    String s = input
+        .replaceAll(RegExp(r'\[.*?\]|\(.*?\)|\*.*?\*|♪.*?♪'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (s.isEmpty) return '';
+
+    List<String> rawWords = s.split(' ');
+    if (rawWords.length <= 1) return s;
+
+    String normToken(String w) =>
+        w.toLowerCase().replaceAll(RegExp(r'[\.,!\?;:"\'\-\(\)\[\]،؛؟…]'), '').trim();
+
+    for (int n = 1; n <= 5; n++) {
+      bool changed = true;
+      while (changed && rawWords.length >= n * 2) {
+        changed = false;
+        final List<String> nextWords = [];
+        int i = 0;
+        while (i < rawWords.length) {
+          if (i + n * 2 <= rawWords.length) {
+            bool match = true;
+            for (int k = 0; k < n; k++) {
+              final String a = normToken(rawWords[i + k]);
+              final String b = normToken(rawWords[i + n + k]);
+              if (a.isEmpty || a != b) {
+                match = false;
+                break;
+              }
+            }
+            if (match) {
+              for (int k = 0; k < n; k++) {
+                nextWords.add(rawWords[i + k]);
+              }
+              i += n * 2;
+              while (i + n <= rawWords.length) {
+                bool more = true;
+                for (int k = 0; k < n; k++) {
+                  if (normToken(rawWords[i + k]) != normToken(nextWords[nextWords.length - n + k])) {
+                    more = false;
+                    break;
+                  }
+                }
+                if (more) {
+                  i += n;
+                } else {
+                  break;
+                }
+              }
+              changed = true;
+              continue;
+            }
+          }
+          nextWords.add(rawWords[i]);
+          i++;
+        }
+        rawWords = nextWords;
+      }
+    }
+
+    final List<String> norms = rawWords.map(normToken).where((w) => w.isNotEmpty).toList();
+    if (norms.length >= 5) {
+      final Map<String, int> counts = {};
+      for (final w in norms) {
+        counts[w] = (counts[w] ?? 0) + 1;
+      }
+      final List<int> sortedCounts = counts.values.toList()..sort((a, b) => b.compareTo(a));
+      final int topTwoSum = sortedCounts.length >= 2 ? (sortedCounts[0] + sortedCounts[1]) : sortedCounts[0];
+      if (counts.length <= 2 || (topTwoSum / norms.length) >= 0.62) {
+        final List<String> seen = [];
+        final List<String> compact = [];
+        for (final rw in rawWords) {
+          final String nt = normToken(rw);
+          if (nt.isNotEmpty && !seen.contains(nt)) {
+            seen.add(nt);
+            compact.add(rw);
+            if (compact.length >= 3) break;
+          }
+        }
+        rawWords = compact;
+      }
+    }
+
+    return rawWords.join(' ').trim();
+  }
+
+  Future<int> _findBestPauseCutMs(String srcWav, int targetEndMs, int maxAudioMs) async {
+    try {
+      if (targetEndMs >= maxAudioMs - 1000) return maxAudioMs;
+      final f = File(srcWav);
+      final int fileLen = await f.length();
+      final int searchStartMs = (targetEndMs - 3000).clamp(0, maxAudioMs);
+      final int searchEndMs = (targetEndMs + 1000).clamp(searchStartMs + 200, maxAudioMs);
+      final int startByte = (44 + searchStartMs * 32).clamp(44, fileLen);
+      final int bytesToRead = ((searchEndMs - searchStartMs) * 32).clamp(0, fileLen - startByte);
+      if (bytesToRead < 6400) return targetEndMs;
+
+      final raf = await f.open(mode: FileMode.read);
+      await raf.setPosition(startByte);
+      final Uint8List buf = await raf.read(bytesToRead);
+      await raf.close();
+
+      int bestOffsetMs = targetEndMs;
+      double minEnergy = 1e18;
+      for (int b = 0; b + 3200 < buf.length; b += 1600) {
+        double e = 0.0;
+        for (int i = b; i < b + 3200; i += 4) {
+          int s = buf[i] | (buf[i + 1] << 8);
+          if (s > 32767) s -= 65536;
+          e += (s * s).toDouble();
+        }
+        if (e < minEnergy) {
+          minEnergy = e;
+          bestOffsetMs = searchStartMs + (b ~/ 32);
+        }
+      }
+      return bestOffsetMs;
+    } catch (_) {
+      return targetEndMs;
+    }
+  }
+
   Future<bool> _writeFastWavSlice16k(String srcWav, String dstWav, int startMs, int endMs) async {
     try {
       final f = File(srcWav);
@@ -5877,12 +5999,29 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       if (fileLen <= 44) return false;
       final int startByte = (44 + (startMs * 32)).clamp(44, fileLen);
       final int endByte = (44 + (endMs * 32)).clamp(startByte, fileLen);
-      final int dataSize = endByte - startByte;
+      final int dataSize = (endByte - startByte) & ~1;
       if (dataSize < 1600) return false;
+
       final raf = await f.open(mode: FileMode.read);
       await raf.setPosition(startByte);
       final Uint8List pcmBytes = await raf.read(dataSize);
       await raf.close();
+
+      double maxFrameRmsSq = 0.0;
+      const int frameBytes = 1600;
+      for (int b = 0; b + frameBytes <= pcmBytes.length; b += frameBytes) {
+        double sumSq = 0.0;
+        for (int i = b; i < b + frameBytes; i += 2) {
+          int s = pcmBytes[i] | (pcmBytes[i + 1] << 8);
+          if (s > 32767) s -= 65536;
+          final double norm = s / 32768.0;
+          sumSq += norm * norm;
+        }
+        final double rmsSq = sumSq / (frameBytes ~/ 2);
+        if (rmsSq > maxFrameRmsSq) maxFrameRmsSq = rmsSq;
+      }
+      if (maxFrameRmsSq < 0.00025) return false;
+
       final ByteData header = ByteData(44);
       header.setUint8(0, 0x52); header.setUint8(1, 0x49); header.setUint8(2, 0x46); header.setUint8(3, 0x46);
       header.setUint32(4, 36 + pcmBytes.length, Endian.little);
@@ -5897,6 +6036,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       header.setUint16(34, 16, Endian.little);
       header.setUint8(36, 0x64); header.setUint8(37, 0x61); header.setUint8(38, 0x74); header.setUint8(39, 0x61);
       header.setUint32(40, pcmBytes.length, Endian.little);
+
       final BytesBuilder b = BytesBuilder(copy: false);
       b.add(header.buffer.asUint8List());
       b.add(pcmBytes);
@@ -6109,7 +6249,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       final masterDubWavPath = '${tempDir.path}/master_dub_track.wav';
 
       final wavCmd =
-          '-y -i "${_inputFile!.path}" -vn -af "highpass=f=90,lowpass=f=7600,dynaudnorm=f=150:g=11" -ar 16000 -ac 1 -c:a pcm_s16le "$tempWavPath"';
+          '-y -i "${_inputFile!.path}" -vn -af "pan=mono|c0=0.5*c0+0.5*c1,highpass=f=110,lowpass=f=3900,afftdn=nf=-24" -ar 16000 -ac 1 -c:a pcm_s16le "$tempWavPath"';
       final wavSession = await FFmpegKit.execute(wavCmd);
       if (!ReturnCode.isSuccess(await wavSession.getReturnCode())) {
         setState(() {
@@ -6134,36 +6274,36 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
       final int wavFileBytes = await File(tempWavPath).length();
       final int totalAudioMs = ((wavFileBytes - 44) ~/ 32).clamp(1000, 14400000);
-      const int windowSpanMs = 180000;
+      const int targetSliceSpanMs = 27500;
       final String chunkWavPath = '${tempDir.path}/whisper_slice_16k.wav';
 
       final List<_DubSegment> rawCleanedSegments = [];
-      final List<String> recentNorms = [];
+      final List<Map<String, dynamic>> recentPhraseHistory = [];
 
-      for (int winStartMs = 0; winStartMs < totalAudioMs; winStartMs += windowSpanMs) {
-        final int winEndMs = (winStartMs + windowSpanMs < totalAudioMs)
-            ? (winStartMs + windowSpanMs)
+      int winStartMs = 0;
+      while (winStartMs + 1200 < totalAudioMs) {
+        final int rawTargetEnd = (winStartMs + targetSliceSpanMs < totalAudioMs)
+            ? (winStartMs + targetSliceSpanMs)
             : totalAudioMs;
-        int cursorMs = winStartMs;
-        int recoveriesInWindow = 0;
+        final int winEndMs = await _findBestPauseCutMs(
+            tempWavPath, rawTargetEnd, totalAudioMs);
 
-        while (cursorMs + 1500 < winEndMs && recoveriesInWindow <= 4) {
-          if (mounted) {
-            setState(() {
-              final int doneMin = cursorMs ~/ 60000;
-              final int totalMin = (totalAudioMs ~/ 60000).clamp(1, 999);
-              _statusMessage =
-                  "Step 2/5: Whisper AI transcribing ($doneMin/$totalMin min • Anti-Loop Active)...";
-            });
-          }
+        if (mounted) {
+          setState(() {
+            final int doneMin = winStartMs ~/ 60000;
+            final int totalMin = (totalAudioMs ~/ 60000).clamp(1, 999);
+            _statusMessage =
+                "Step 2/5: Whisper AI transcribing ($doneMin/$totalMin min • Zero-Loop 28s Mode)...";
+          });
+        }
 
-          final bool slicedOk = await _writeFastWavSlice16k(
-              tempWavPath, chunkWavPath, cursorMs, winEndMs);
-          final String audioPathToUse = slicedOk ? chunkWavPath : tempWavPath;
+        final bool hasSpeechSlice = await _writeFastWavSlice16k(
+            tempWavPath, chunkWavPath, winStartMs, winEndMs);
 
+        if (hasSpeechSlice) {
           final res = await whisper.transcribe(
             transcribeRequest: TranscribeRequest(
-              audio: audioPathToUse,
+              audio: chunkWavPath,
               language: "auto",
               isTranslate: targetLangCode.toLowerCase().startsWith('en'),
               isNoTimestamps: false,
@@ -6172,74 +6312,69 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           );
 
           final segs = res.segments;
-          if (segs == null || segs.isEmpty) break;
+          if (segs != null && segs.isEmpty == false) {
+            for (final s in segs) {
+              final String clean = _collapseRepeatedWordsAndPhrases(s.text);
+              if (clean.isEmpty) continue;
 
-          int repeatStreak = 0;
-          int? loopRecoveryNextMs;
-
-          for (final s in segs) {
-            String clean = s.text
-                .replaceAll(RegExp(r'\[.*?\]|\(.*?\)|\*.*?\*|♪.*?♪'), ' ')
-                .replaceAll(RegExp(r'\s+'), ' ')
-                .trim();
-            if (clean.isEmpty) continue;
-
-            clean = clean.replaceAllMapped(
-              RegExp(r'\b(\w+(?:\s+\w+){0,5})(?:[,\.\s]+\1\b)+', caseSensitive: false),
-              (m) => m.group(1) ?? '',
-            ).trim();
-
-            final String norm = clean
-                .toLowerCase()
-                .replaceAll(RegExp(r'[^a-z0-9\u0600-\u06FF\s]'), '')
-                .replaceAll(RegExp(r'\s+'), ' ')
-                .trim();
-            if (norm.isEmpty) continue;
-            if (norm.contains('subtitles by') ||
-                norm.contains('amaraorg') ||
-                norm == 'thank you for watching') {
-              continue;
-            }
-
-            final int gStart = slicedOk ? (cursorMs + s.fromTs.inMilliseconds) : s.fromTs.inMilliseconds;
-            final int gEnd = slicedOk ? (cursorMs + s.toTs.inMilliseconds) : s.toTs.inMilliseconds;
-
-            bool isLoopRepeat = recentNorms.contains(norm);
-            if (!isLoopRepeat && recentNorms.isNotEmpty && norm.length >= 8) {
-              final String prev = recentNorms.last;
-              if (prev.length >= 8 && (norm.startsWith(prev) || prev.startsWith(norm))) {
-                isLoopRepeat = true;
+              final String norm = clean
+                  .toLowerCase()
+                  .replaceAll(RegExp(r'[\.,!\?;:"\'\-\(\)\[\]،؛؟…]'), '')
+                  .replaceAll(RegExp(r'\s+'), ' ')
+                  .trim();
+              if (norm.isEmpty) continue;
+              if (norm.contains('subtitles by') ||
+                  norm.contains('amaraorg') ||
+                  norm == 'thank you for watching' ||
+                  norm == 'thank you') {
+                continue;
               }
-            }
 
-            if (isLoopRepeat) {
-              repeatStreak++;
-              if (slicedOk &&
-                  repeatStreak >= 2 &&
-                  (winEndMs - gEnd) > 5000 &&
-                  recoveriesInWindow < 4) {
-                loopRecoveryNextMs = gEnd + 1200;
-                break;
+              final int gStart = winStartMs + s.fromTs.inMilliseconds;
+              final int gEnd = winStartMs + s.toTs.inMilliseconds;
+              final List<String> words = norm.split(' ');
+
+              recentPhraseHistory.removeWhere((item) => (gStart - (item['ms'] as int)) > 95000);
+
+              bool isLoopDuplicate = false;
+              for (final item in recentPhraseHistory) {
+                final String prevNorm = item['norm'] as String;
+                final List<String> prevWords = item['words'] as List<String>;
+                if (norm == prevNorm) {
+                  isLoopDuplicate = true;
+                  break;
+                }
+                if (words.length <= 4 && prevWords.length <= 4 && words.length >= 2 && prevWords.length >= 2) {
+                  if (words[0] == prevWords[0] && words[1] == prevWords[1]) {
+                    isLoopDuplicate = true;
+                    break;
+                  }
+                }
+                if (norm.length >= 10 && prevNorm.length >= 10 &&
+                    (norm.startsWith(prevNorm) || prevNorm.startsWith(norm))) {
+                  isLoopDuplicate = true;
+                  break;
+                }
               }
-              continue;
+
+              if (isLoopDuplicate) continue;
+
+              recentPhraseHistory.add({
+                'ms': gStart,
+                'norm': norm,
+                'words': words,
+              });
+              if (recentPhraseHistory.length > 18) {
+                recentPhraseHistory.removeAt(0);
+              }
+
+              rawCleanedSegments.add(
+                  _DubSegment(startMs: gStart, endMs: gEnd, text: clean));
             }
-
-            repeatStreak = 0;
-            recentNorms.add(norm);
-            if (recentNorms.length > 4) recentNorms.removeAt(0);
-
-            rawCleanedSegments.add(
-                _DubSegment(startMs: gStart, endMs: gEnd, text: clean));
-          }
-
-          if (!slicedOk) break;
-          if (loopRecoveryNextMs != null) {
-            cursorMs = loopRecoveryNextMs;
-            recoveriesInWindow++;
-          } else {
-            break;
           }
         }
+
+        winStartMs = winEndMs;
       }
 
       if (await File(chunkWavPath).exists()) {
@@ -6265,7 +6400,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               !prev.text.endsWith('.') &&
               !prev.text.endsWith('?')) {
             prev.endMs = s.endMs;
-            prev.text = "${prev.text} ${s.text}";
+            prev.text = _collapseRepeatedWordsAndPhrases("${prev.text} ${s.text}");
             continue;
           }
         }
@@ -6312,10 +6447,17 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       double prevSpeakerF0 = 130.0;
       int prevSegmentEndMs = 0;
 
+      final List<String> recentTranslatedNorms = [];
       for (int i = 0; i < mergedSegments.length; i++) {
         final seg = mergedSegments[i];
-        final String translatedLine = translatedLines[i].trim();
+        final String translatedLine = _collapseRepeatedWordsAndPhrases(translatedLines[i].trim());
         if (translatedLine.isEmpty) continue;
+        final String transNorm = translatedLine.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
+        if (recentTranslatedNorms.contains(transNorm)) {
+          continue;
+        }
+        recentTranslatedNorms.add(transNorm);
+        if (recentTranslatedNorms.length > 8) recentTranslatedNorms.removeAt(0);
 
         // Automatically detect if the speaker in the original video is Male or Female + assign Character #1/#2/#3
         final Map<String, dynamic> speakerInfo = await _analyzeOriginalSpeakerSegment(
@@ -6545,7 +6687,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       final tempSrtPath = '${tempDir.path}/whisper_subs.srt';
 
       final wavCmd =
-          '-y -i "${_inputFile!.path}" -vn -af "highpass=f=90,lowpass=f=7600,dynaudnorm=f=150:g=11" -ar 16000 -ac 1 -c:a pcm_s16le "$tempWavPath"';
+          '-y -i "${_inputFile!.path}" -vn -af "pan=mono|c0=0.5*c0+0.5*c1,highpass=f=110,lowpass=f=3900,afftdn=nf=-24" -ar 16000 -ac 1 -c:a pcm_s16le "$tempWavPath"';
       final wavSession = await FFmpegKit.execute(wavCmd);
       if (!ReturnCode.isSuccess(await wavSession.getReturnCode())) {
         setState(() {

@@ -5880,7 +5880,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     if (rawWords.length <= 1) return s;
 
     String normToken(String w) =>
-        w.toLowerCase().replaceAll(RegExp(r'[\.,!\?;:"\'\-\(\)\[\]،؛؟…]'), '').trim();
+        w.toLowerCase().replaceAll(RegExp(r'[.,!?;:\-()\[\]]'), '').trim();
 
     for (int n = 1; n <= 5; n++) {
       bool changed = true;
@@ -6319,7 +6319,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
               final String norm = clean
                   .toLowerCase()
-                  .replaceAll(RegExp(r'[\.,!\?;:"\'\-\(\)\[\]،؛؟…]'), '')
+                  .replaceAll(RegExp(r'[.,!?;:\-()\[\]]'), '')
                   .replaceAll(RegExp(r'\s+'), ' ')
                   .trim();
               if (norm.isEmpty) continue;

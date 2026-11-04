@@ -6029,14 +6029,14 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           quietStreak++;
           if (quietStreak >= 6) {
             for (int i = b; i < b + frameBytes; i++) {
-              pcmBytes[i] = 0;
+              // keep quiet speech intact
             }
           }
         } else {
           quietStreak = 0;
         }
       }
-      if (maxFrameRmsSq < 0.00022) return false;
+      if (maxFrameRmsSq < 0.00003) return false;
 
       final ByteData header = ByteData(44);
       header.setUint8(0, 0x52); header.setUint8(1, 0x49); header.setUint8(2, 0x46); header.setUint8(3, 0x46);
@@ -6404,7 +6404,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             final int doneMin = winStartMs ~/ 60000;
             final int totalMin = (totalAudioMs ~/ 60000).clamp(1, 999);
             _statusMessage =
-                "Step 2/5: Whisper AI ($doneMin/$totalMin min • 27.5s Zero-Loop + Auto-Save)...";
+                "Step 2/5: Whisper AI ($doneMin/$totalMin min • 27.5s Zero-Loop v3 + Full BGM)...";
           });
         }
 
@@ -6424,6 +6424,12 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
           final segs = res.segments;
           if (segs != null && segs.isEmpty == false) {
+            final Map<String, int> slicePhraseCounts = {};
+            for (final s0 in segs) {
+              final String c0 = _collapseRepeatedWordsAndPhrases(s0.text);
+              final String n0 = c0.toLowerCase().replaceAll('"', '').replaceAll("'", '').replaceAll(RegExp(r'[.,!?;:\-()\[\]]'), '').replaceAll(RegExp(r'\s+'), ' ').trim();
+              if (n0.isNotEmpty) slicePhraseCounts[n0] = (slicePhraseCounts[n0] ?? 0) + 1;
+            }
             for (final s in segs) {
               final String clean = _collapseRepeatedWordsAndPhrases(s.text);
               if (clean.isEmpty) continue;
@@ -6470,6 +6476,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                 }
               }
 
+              if ((slicePhraseCounts[norm] ?? 0) >= 2 && words.length <= 4) {
+                isLoopDuplicate = true;
+              }
               if (isLoopDuplicate) continue;
 
               recentPhraseHistory.add({
@@ -6829,7 +6838,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       String dubCmd;
       if (keepBackgroundAudio) {
         dubCmd =
-            '-y -fflags +genpts -i "${_inputFile!.path}" -i "$masterDubWavPath" -filter_complex "[0:a]aresample=async=1,volume=0.15[bg];[1:a]apad,volume=2.0[dub];[bg][dub]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]" $videoMappingAndCodec -map "[aout]" -c:a aac -ac 2 -ar 44100 -b:a 192k "$outVideoPath"';
+            '-y -fflags +genpts -i "${_inputFile!.path}" -i "$masterDubWavPath" -filter_complex "[0:a]aresample=async=1,equalizer=f=1000:width_type=o:width=2:g=-8,volume=0.70[bg];[1:a]apad,volume=2.0[dub];[bg][dub]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]" $videoMappingAndCodec -map "[aout]" -c:a aac -ac 2 -ar 44100 -b:a 192k "$outVideoPath"';
       } else {
         dubCmd =
             '-y -fflags +genpts -i "${_inputFile!.path}" -i "$masterDubWavPath" -filter_complex "[1:a]apad,volume=1.8[aout]" $videoMappingAndCodec -map "[aout]" -c:a aac -ac 2 -ar 44100 -b:a 192k -shortest "$outVideoPath"';

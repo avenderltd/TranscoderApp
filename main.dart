@@ -6751,7 +6751,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             '-y -i "$rawTtsPath" -ar 24000 -ac 1 -c:a pcm_s16le "$segWavPath"',
           );
           if (ReturnCode.isSuccess(await fallbackSess.getReturnCode()) &&
-              await File(fallbackSess.getReturnCode())) {
+              await File(segWavPath).exists()) {
             actualSec = await _appendWavClipToMasterPcm24k(masterPcmPath, segWavPath);
           }
         }
@@ -6835,7 +6835,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       String dubCmd;
       if (keepBackgroundAudio) {
         dubCmd =
-            '-y -fflags +genpts -i "${_inputFile!.path}" -i "$masterDubWavPath" -filter_complex "[0:a]aresample=async=1,equalizer=f=1000:width_type=o:width=2:g=-8,volume=0.70[bg];[1:a]apad,volume=2.0[dub];[bg][dub]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]" $videoMappingAndCodec -map "[aout]" -c:a aac -ac 2 -ar 44100 -b:a 192k "$outVideoPath"';
+            '-y -fflags +genpts -i "${_inputFile!.path}" -i "$masterDubWavPath" -filter_complex "[0:a]aresample=async=1,pan=stereo|c0=0.85*c0-0.35*c1|c1=0.85*c1-0.35*c0,equalizer=f=500:width_type=o:width=1.4:g=-14,equalizer=f=1250:width_type=o:width=1.5:g=-16,equalizer=f=2300:width_type=o:width=1.4:g=-14,volume=0.95[bg];[1:a]apad,volume=2.0[dub];[bg][dub]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]" $videoMappingAndCodec -map "[aout]" -c:a aac -ac 2 -ar 44100 -b:a 192k "$outVideoPath"';
       } else {
         dubCmd =
             '-y -fflags +genpts -i "${_inputFile!.path}" -i "$masterDubWavPath" -filter_complex "[1:a]apad,volume=1.8[aout]" $videoMappingAndCodec -map "[aout]" -c:a aac -ac 2 -ar 44100 -b:a 192k -shortest "$outVideoPath"';

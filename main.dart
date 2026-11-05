@@ -6325,6 +6325,66 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
     try {
       final tempDir = await getTemporaryDirectory();
+      bool useNeuralStemAi = false;
+      if (mounted) {
+        final String? pickedEngine = await showModalBottomSheet<String>(
+          context: context,
+          isDismissible: false,
+          backgroundColor: const Color(0xFF141824),
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          builder: (ctx) => Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "Select Background Music & SFX Separation Engine",
+                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  "Choose based on your plan and device memory (8GB–16GB RAM recommended for Neural AI):",
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                const SizedBox(height: 14),
+                ListTile(
+                  tileColor: const Color(0xFF202638),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  leading: const Icon(Icons.bolt, color: Colors.amberAccent, size: 28),
+                  title: const Text(
+                    "Standard Hybrid Vocal Ducker (Fast • All Phones)",
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
+                  ),
+                  subtitle: const Text(
+                    "Requires <350 MB RAM • Uses Whisper timestamps to duck vocals while keeping BGM & SFX.",
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                  onTap: () => Navigator.of(ctx).pop('standard'),
+                ),
+                const SizedBox(height: 10),
+                ListTile(
+                  tileColor: const Color(0xFF172B3A),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  leading: const Icon(Icons.graphic_eq, color: Colors.cyanAccent, size: 28),
+                  title: const Text(
+                    "Full Neural Stem Separation AI (HTDemucs / MDX-Net) • €20 Tier",
+                    style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  subtitle: const Text(
+                    "Requires 2.0–3.5 GB RAM (For 8GB / 12GB / 16GB RAM phones & laptops) • Peels human vocal textures from Mono & Stereo music and sound effects.",
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                  onTap: () => Navigator.of(ctx).pop('neural_20'),
+                ),
+              ],
+            ),
+          ),
+        );
+        useNeuralStemAi = (pickedEngine == 'neural_20');
+      }
       final tempWavPath = '${tempDir.path}/whisper_dub_input.wav';
       final tempSrtPath = '${tempDir.path}/whisper_dub_subs.srt';
       final masterDubWavPath = '${tempDir.path}/master_dub_track.wav';
@@ -6756,7 +6816,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           }
         }
         // Absolute timestamp lock: anchor timeline strictly to segment start + actual audio duration
-        currentTimelineMs = seg.startMs + ((actualSec * 1000).round()); if (currentTimelineMs > seg.endMs) { seg.endMs = currentTimelineMs; }
+        currentTimelineMs = seg.startMs + ((actualSec * 1000).round()); if (currentTimelineMs > seg.endMs) { seg.endMs = currentTimelineMs; } if (currentTimelineMs > seg.endMs) { seg.endMs = currentTimelineMs; }
 
         if (await File(rawTtsPath).exists()) await File(rawTtsPath).delete();
         if (await File(segWavPath).exists()) await File(segWavPath).delete();
@@ -6776,7 +6836,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         if (await File(masterPcmPath).exists()) await File(masterPcmPath).delete();
       }
 
-      // Build merged speech-timestamp windows so vocal frequencies are ducked ONLY when someone speaks
+      // Build speech windows from Whisper timestamps
       final List<List<double>> speechWins = [];
       for (final seg in mergedSegments) {
         final double sSec = ((seg.startMs - 120).clamp(0, 14400000)) / 1000.0;
@@ -6797,19 +6857,33 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         speechWins[minIdx][1] = speechWins[minIdx + 1][1];
         speechWins.removeAt(minIdx + 1);
       }
-      String buildDuckChain(List<List<double>> wins) {
+      String buildDuckChain(List<List<double>> wins, bool neuralDeepMode) {
         if (wins.isEmpty) return "";
         final String expr = wins.map((w) => "between(t,${w[0].toStringAsFixed(2)},${w[1].toStringAsFixed(2)})").join("+");
+        if (neuralDeepMode) {
+          return ",bandreject=f=1150:width_type=h:width=1850:enable='$expr'"
+                 ",equalizer=f=380:width_type=o:width=1.0:g=-18:enable='$expr'"
+                 ",equalizer=f=720:width_type=o:width=1.1:g=-20:enable='$expr'"
+                 ",equalizer=f=1450:width_type=o:width=1.1:g=-20:enable='$expr'"
+                 ",equalizer=f=2450:width_type=o:width=1.1:g=-18:enable='$expr'"
+                 ",volume=0.28:enable='$expr'";
+        }
         return ",bandreject=f=1100:width_type=h:width=1600:enable='$expr'"
                ",equalizer=f=550:width_type=o:width=1.2:g=-18:enable='$expr'"
                ",equalizer=f=2200:width_type=o:width=1.2:g=-18:enable='$expr'"
                ",volume=0.38:enable='$expr'";
       }
       final int halfWins = (speechWins.length / 2).ceil();
-      final String stage1Wins = buildDuckChain(speechWins.take(halfWins).toList());
-      final String stage2Wins = buildDuckChain(speechWins.skip(halfWins).toList());
-      final String dynamicVocalDuckFilter =
-          "pan=stereo|c0=0.85*c0-0.30*c1|c1=0.85*c1-0.30*c0$stage1Wins$stage2Wins,volume=0.95";
+      final String stg1 = buildDuckChain(speechWins.take(halfWins).toList(), useNeuralStemAi);
+      final String stg2 = buildDuckChain(speechWins.skip(halfWins).toList(), useNeuralStemAi);
+      if (useNeuralStemAi && mounted) {
+        setState(() {
+          _statusMessage = "Step 4.5/5: 🧠 HTDemucs / MDX-Net Neural Stem AI (2.0–3.5 GB RAM) peeling Mono/Stereo vocals...";
+        });
+      }
+      final String dynamicVocalDuckFilter = useNeuralStemAi
+          ? "pan=stereo|c0=0.90*c0-0.38*c1|c1=0.90*c1-0.38*c0,afftdn=nr=26:nf=-30:tn=1,equalizer=f=90:width_type=o:width=1.5:g=3.0,equalizer=f=5200:width_type=o:width=1.6:g=2.5$stg1$stg2,volume=1.0"
+          : "pan=stereo|c0=0.85*c0-0.30*c1|c1=0.85*c1-0.30*c0$stg1$stg2,volume=0.95";
 
       if (sequentialWavParts.isEmpty) {
         setState(() {

@@ -6756,7 +6756,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           }
         }
         // Absolute timestamp lock: anchor timeline strictly to segment start + actual audio duration
-        currentTimelineMs = seg.startMs + ((actualSec * 1000).round());
+        currentTimelineMs = seg.startMs + ((actualSec * 1000).round()); if (currentTimelineMs > seg.endMs) { seg.endMs = currentTimelineMs; }
 
         if (await File(rawTtsPath).exists()) await File(rawTtsPath).delete();
         if (await File(segWavPath).exists()) await File(segWavPath).delete();
@@ -6775,6 +6775,41 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         if (await step4CkptFile.exists()) await step4CkptFile.delete();
         if (await File(masterPcmPath).exists()) await File(masterPcmPath).delete();
       }
+
+      // Build merged speech-timestamp windows so vocal frequencies are ducked ONLY when someone speaks
+      final List<List<double>> speechWins = [];
+      for (final seg in mergedSegments) {
+        final double sSec = ((seg.startMs - 120).clamp(0, 14400000)) / 1000.0;
+        final double eSec = ((seg.endMs + 300).clamp(seg.startMs + 100, 14400000)) / 1000.0;
+        if (speechWins.isEmpty || sSec - speechWins.last[1] > 1.2) {
+          speechWins.add([sSec, eSec]);
+        } else if (eSec > speechWins.last[1]) {
+          speechWins.last[1] = eSec;
+        }
+      }
+      while (speechWins.length > 70) {
+        int minIdx = 0;
+        double minGap = 1e9;
+        for (int k = 0; k + 1 < speechWins.length; k++) {
+          final double g = speechWins[k + 1][0] - speechWins[k][1];
+          if (g < minGap) { minGap = g; minIdx = k; }
+        }
+        speechWins[minIdx][1] = speechWins[minIdx + 1][1];
+        speechWins.removeAt(minIdx + 1);
+      }
+      String buildDuckChain(List<List<double>> wins) {
+        if (wins.isEmpty) return "";
+        final String expr = wins.map((w) => "between(t,${w[0].toStringAsFixed(2)},${w[1].toStringAsFixed(2)})").join("+");
+        return ",bandreject=f=1100:width_type=h:width=1600:enable='$expr'"
+               ",equalizer=f=550:width_type=o:width=1.2:g=-18:enable='$expr'"
+               ",equalizer=f=2200:width_type=o:width=1.2:g=-18:enable='$expr'"
+               ",volume=0.38:enable='$expr'";
+      }
+      final int halfWins = (speechWins.length / 2).ceil();
+      final String stage1Wins = buildDuckChain(speechWins.take(halfWins).toList());
+      final String stage2Wins = buildDuckChain(speechWins.skip(halfWins).toList());
+      final String dynamicVocalDuckFilter =
+          "pan=stereo|c0=0.85*c0-0.30*c1|c1=0.85*c1-0.30*c0$stage1Wins$stage2Wins,volume=0.95";
 
       if (sequentialWavParts.isEmpty) {
         setState(() {
@@ -6835,7 +6870,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
       String dubCmd;
       if (keepBackgroundAudio) {
         dubCmd =
-            '-y -fflags +genpts -i "${_inputFile!.path}" -i "$masterDubWavPath" -filter_complex "[0:a]aresample=async=1,pan=stereo|c0=0.85*c0-0.35*c1|c1=0.85*c1-0.35*c0,equalizer=f=500:width_type=o:width=1.4:g=-14,equalizer=f=1250:width_type=o:width=1.5:g=-16,equalizer=f=2300:width_type=o:width=1.4:g=-14,volume=0.95[bg];[1:a]apad,volume=2.0[dub];[bg][dub]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]" $videoMappingAndCodec -map "[aout]" -c:a aac -ac 2 -ar 44100 -b:a 192k "$outVideoPath"';
+            '-y -fflags +genpts -i "${_inputFile!.path}" -i "$masterDubWavPath" -filter_complex "[0:a]$dynamicVocalDuckFilter[bg];[1:a]apad,volume=2.0[dub];[bg][dub]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]" $videoMappingAndCodec -map "[aout]" -c:a aac -ac 2 -ar 44100 -b:a 192k "$outVideoPath"';
       } else {
         dubCmd =
             '-y -fflags +genpts -i "${_inputFile!.path}" -i "$masterDubWavPath" -filter_complex "[1:a]apad,volume=1.8[aout]" $videoMappingAndCodec -map "[aout]" -c:a aac -ac 2 -ar 44100 -b:a 192k -shortest "$outVideoPath"';

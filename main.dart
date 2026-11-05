@@ -1,5 +1,4 @@
 import 'dart:typed_data';
-bool _globalUseNeuralStemAi = true;
 
 import 'package:flutter/services.dart';
 // ============================================================================
@@ -32,6 +31,8 @@ import 'package:whisper_flutter_new/whisper_flutter_new.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
+
+bool _globalUseNeuralStemAi = true;
 
 void main() => runApp(const TranscoderApp());
 

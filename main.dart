@@ -6742,24 +6742,21 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           '-y -i "$rawTtsPath" -af "$filterChain" -ar 24000 -ac 1 -c:a pcm_s16le "$segWavPath"',
         );
 
+        double actualSec = 0.0;
         if (ReturnCode.isSuccess(await voiceSess.getReturnCode()) &&
             await File(segWavPath).exists()) {
-          final double actualSec = await _appendWavClipToMasterPcm24k(masterPcmPath, segWavPath);
-          if (actualSec > 0.05) {
-            currentTimelineMs += (actualSec * 1000).round();
-          }
+          actualSec = await _appendWavClipToMasterPcm24k(masterPcmPath, segWavPath);
         } else {
           final fallbackSess = await FFmpegKit.execute(
             '-y -i "$rawTtsPath" -ar 24000 -ac 1 -c:a pcm_s16le "$segWavPath"',
           );
           if (ReturnCode.isSuccess(await fallbackSess.getReturnCode()) &&
-              await File(segWavPath).exists()) {
-            final double actualSec = await _appendWavClipToMasterPcm24k(masterPcmPath, segWavPath);
-            if (actualSec > 0.05) {
-              currentTimelineMs += (actualSec * 1000).round();
-            }
+              await File(fallbackSess.getReturnCode())) {
+            actualSec = await _appendWavClipToMasterPcm24k(masterPcmPath, segWavPath);
           }
         }
+        // Absolute timestamp lock: anchor timeline strictly to segment start + actual audio duration
+        currentTimelineMs = seg.startMs + ((actualSec * 1000).round());
 
         if (await File(rawTtsPath).exists()) await File(rawTtsPath).delete();
         if (await File(segWavPath).exists()) await File(segWavPath).delete();

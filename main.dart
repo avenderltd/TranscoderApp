@@ -1,4 +1,6 @@
 import 'dart:typed_data';
+bool _globalUseNeuralStemAi = true;
+
 import 'package:flutter/services.dart';
 // ============================================================================
 // FILE: main.dart — PART 1 OF 3 (COMPLETE • LINE-BY-LINE VERIFIED)
@@ -5493,7 +5495,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                             horizontal: 10, vertical: 0),
                         title: Text(
                           keepBackgroundAudio
-                              ? "Original Video Audio: 15%"
+                              ? "Original Movie Music & SFX: Active"
                               : "Original Video Audio: Muted (0%)",
                           style: const TextStyle(
                               color: Colors.white,
@@ -5505,6 +5507,80 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                             setModalState(() => keepBackgroundAudio = val),
                       ),
                     ),
+                  const SizedBox(height: 8),
+                  StatefulBuilder(
+                    builder: (ctx, setEngineState) => Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF121D1A),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.tealAccent.withOpacity(0.35)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            "🎵 BGM & SFX Vocal Separation Engine:",
+                            style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: InkWell(
+                                  onTap: () => setEngineState(() => _globalUseNeuralStemAi = false),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                                    decoration: BoxDecoration(
+                                      color: !_globalUseNeuralStemAi ? const Color(0xFF1F4E43) : const Color(0xFF1A2421),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: !_globalUseNeuralStemAi ? Colors.tealAccent : Colors.white24,
+                                        width: !_globalUseNeuralStemAi ? 1.5 : 1.0,
+                                      ),
+                                    ),
+                                    child: const Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text("⚡ Light Hybrid", style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                                        SizedBox(height: 2),
+                                        Text("<350MB RAM • Fast (All Phones)", style: TextStyle(color: Colors.white70, fontSize: 10)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: InkWell(
+                                  onTap: () => setEngineState(() => _globalUseNeuralStemAi = true),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                                    decoration: BoxDecoration(
+                                      color: _globalUseNeuralStemAi ? const Color(0xFF173F4E) : const Color(0xFF1A2421),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: _globalUseNeuralStemAi ? Colors.cyanAccent : Colors.white24,
+                                        width: _globalUseNeuralStemAi ? 1.5 : 1.0,
+                                      ),
+                                    ),
+                                    child: const Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text("🧠 Neural Stem AI • €20", style: TextStyle(color: Colors.cyanAccent, fontSize: 12, fontWeight: FontWeight.bold)),
+                                        SizedBox(height: 2),
+                                        Text("2–3.5GB RAM • Mono & Stereo", style: TextStyle(color: Colors.white70, fontSize: 10)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                     const SizedBox(height: 8),
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
@@ -6325,66 +6401,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
     try {
       final tempDir = await getTemporaryDirectory();
-      bool useNeuralStemAi = false;
-      if (mounted) {
-        final String? pickedEngine = await showModalBottomSheet<String>(
-          context: context,
-          isDismissible: false,
-          backgroundColor: const Color(0xFF141824),
-          shape: const RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          builder: (ctx) => Padding(
-            padding: const EdgeInsets.all(18),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "Select Background Music & SFX Separation Engine",
-                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  "Choose based on your plan and device memory (8GB–16GB RAM recommended for Neural AI):",
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-                const SizedBox(height: 14),
-                ListTile(
-                  tileColor: const Color(0xFF202638),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  leading: const Icon(Icons.bolt, color: Colors.amberAccent, size: 28),
-                  title: const Text(
-                    "Standard Hybrid Vocal Ducker (Fast • All Phones)",
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
-                  ),
-                  subtitle: const Text(
-                    "Requires <350 MB RAM • Uses Whisper timestamps to duck vocals while keeping BGM & SFX.",
-                    style: TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                  onTap: () => Navigator.of(ctx).pop('standard'),
-                ),
-                const SizedBox(height: 10),
-                ListTile(
-                  tileColor: const Color(0xFF172B3A),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  leading: const Icon(Icons.graphic_eq, color: Colors.cyanAccent, size: 28),
-                  title: const Text(
-                    "Full Neural Stem Separation AI (HTDemucs / MDX-Net) • €20 Tier",
-                    style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold, fontSize: 14),
-                  ),
-                  subtitle: const Text(
-                    "Requires 2.0–3.5 GB RAM (For 8GB / 12GB / 16GB RAM phones & laptops) • Peels human vocal textures from Mono & Stereo music and sound effects.",
-                    style: TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                  onTap: () => Navigator.of(ctx).pop('neural_20'),
-                ),
-              ],
-            ),
-          ),
-        );
-        useNeuralStemAi = (pickedEngine == 'neural_20');
-      }
+      final bool useNeuralStemAi = _globalUseNeuralStemAi;
       final tempWavPath = '${tempDir.path}/whisper_dub_input.wav';
       final tempSrtPath = '${tempDir.path}/whisper_dub_subs.srt';
       final masterDubWavPath = '${tempDir.path}/master_dub_track.wav';

@@ -6142,12 +6142,76 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
   }
 
   Future<bool> _appendSilenceToMasterPcm24k(String masterPcmPath, double durationSec) async {
+    await _lockMasterPcmToExactMs24k(masterPcmPath, (durationSec * 1000).round());
+    return true;
+  }
+
+  Future<void> _lockMasterPcmToExactMs24k(String masterPcmPath, int targetMs) async {
     try {
-      final int numSamples = (durationSec * 24000).round().clamp(1, 24000 * 60);
-      await File(masterPcmPath).writeAsBytes(Uint8List(numSamples * 2), mode: FileMode.append, flush: true);
-      return true;
+      final File f = File(masterPcmPath);
+      if (!await f.exists()) await f.writeAsBytes(Uint8List(0), flush: true);
+      final int targetBytes = (targetMs * 48).clamp(0, 2000000000);
+      final int curBytes = await f.length();
+      if (curBytes < targetBytes) {
+        int rem = targetBytes - curBytes;
+        final Uint8List zeroChunk = Uint8List(480000);
+        final raf = await f.open(mode: FileMode.append);
+        while (rem > 0) {
+          final int n = rem > zeroChunk.length ? zeroChunk.length : rem;
+          await raf.writeFrom(zeroChunk, 0, n);
+          rem -= n;
+        }
+        await raf.flush();
+        await raf.close();
+      } else if (curBytes > targetBytes) {
+        final raf = await f.open(mode: FileMode.append);
+        await raf.truncate(targetBytes);
+        await raf.flush();
+        await raf.close();
+      }
+    } catch (_) {}
+  }
+
+  // Scans the original 16kHz reference voice waveform to find the exact ms the original actor starts and stops speaking
+  Future<List<int>> _snapToOriginalReferenceVoice(String refWav16k, int wStartMs, int wEndMs) async {
+    try {
+      final File f = File(refWav16k);
+      if (!await f.exists()) return [wStartMs, wEndMs];
+      final int fLen = await f.length();
+      final int sByte = (44 + wStartMs * 32).clamp(44, fLen);
+      final int eByte = (44 + wEndMs * 32).clamp(sByte, fLen);
+      final int nBytes = (eByte - sByte) & ~1;
+      if (nBytes < 1280) return [wStartMs, wEndMs];
+      final raf = await f.open(mode: FileMode.read);
+      await raf.setPosition(sByte);
+      final Uint8List buf = await raf.read(nBytes);
+      await raf.close();
+      const int winBytes = 640; // 20ms at 16kHz 16-bit mono
+      final List<double> env = [];
+      double maxE = 0.0;
+      for (int b = 0; b + winBytes <= buf.length; b += winBytes) {
+        double sum = 0.0;
+        for (int i = b; i < b + winBytes; i += 4) {
+          int s = buf[i] | (buf[i + 1] << 8);
+          if (s > 32767) s -= 65536;
+          final double v = s / 32768.0;
+          sum += v * v;
+        }
+        final double rmsSq = sum / (winBytes ~/ 4);
+        env.add(rmsSq);
+        if (rmsSq > maxE) maxE = rmsSq;
+      }
+      if (env.isEmpty || maxE < 0.00008) return [wStartMs, wEndMs];
+      final double gate = (maxE * 0.12).clamp(0.00012, 0.004);
+      int firstWin = 0;
+      int lastWin = env.length - 1;
+      while (firstWin < env.length && env[firstWin] < gate) firstWin++;
+      while (lastWin > firstWin && env[lastWin] < gate) lastWin--;
+      final int snappedStart = (wStartMs + (firstWin * 20) - 20).clamp(wStartMs, wEndMs - 250);
+      final int snappedEnd = (wStartMs + ((lastWin + 1) * 20) + 40).clamp(snappedStart + 250, wEndMs + 200);
+      return [snappedStart, snappedEnd];
     } catch (_) {
-      return false;
+      return [wStartMs, wEndMs];
     }
   }
 
@@ -6425,7 +6489,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             "Step 2/5: Recognizing speech with Offline Whisper AI...";
       });
 
-      final String videoResumeSig = '${_inputFile!.lengthSync()}_${targetLangCode.toLowerCase()}';
+      final String videoResumeSig = '${_inputFile!.lengthSync()}_${targetLangCode.toLowerCase()}_refsync6';
       final File step2CkptFile = File('${tempDir.path}/dub_ckpt2_$videoResumeSig.txt');
       final File step4CkptFile = File('${tempDir.path}/dub_ckpt4_$videoResumeSig.txt');
       final String masterPcmPath = '${tempDir.path}/dub_master_$videoResumeSig.pcm';
@@ -6777,33 +6841,22 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
         );
         if (!ok || !await File(rawTtsPath).exists()) continue;
 
-        final int segStartMs = seg.startMs;
+        final List<int> refVoiceSpan = await _snapToOriginalReferenceVoice(tempWavPath, seg.startMs, seg.endMs);
+        final int segStartMs = refVoiceSpan[0];
+        final int refVoiceEndMs = refVoiceSpan[1];
         final int nextSegStartMs = (i + 1 < mergedSegments.length)
             ? mergedSegments[i + 1].startMs
             : seg.endMs + 4000;
-
-        if (segStartMs > currentTimelineMs) {
-          final double gapSec = (segStartMs - currentTimelineMs) / 1000.0;
-          if (gapSec >= 0.04) {
-            if (await _appendSilenceToMasterPcm24k(masterPcmPath, gapSec)) {
-              currentTimelineMs = segStartMs;
-            }
-          }
-        }
-
+        await _lockMasterPcmToExactMs24k(masterPcmPath, segStartMs);
+        currentTimelineMs = segStartMs;
         final double rawTtsSec =
             await _getMediaDurationSeconds(rawTtsPath, fallback: 2.2);
-        final double naturalSlotSec =
-            ((nextSegStartMs - segStartMs) / 1000.0).clamp(1.2, 25.0);
-        final double remainingSlotSec =
-            ((nextSegStartMs - currentTimelineMs) / 1000.0).clamp(1.0, 25.0);
-        final double targetSlotSec = remainingSlotSec < naturalSlotSec * 0.6
-            ? naturalSlotSec * 0.75
-            : remainingSlotSec;
-
+        final double refSpeechSec = ((refVoiceEndMs - segStartMs) / 1000.0).clamp(0.75, 22.0);
+        final double maxSlotSec = ((nextSegStartMs - segStartMs - 30) / 1000.0).clamp(0.85, 25.0);
+        final double targetSlotSec = (refSpeechSec * 1.12 < maxSlotSec) ? (refSpeechSec * 1.12) : maxSlotSec;
         double targetTempo = 1.01;
         if (rawTtsSec > targetSlotSec) {
-          targetTempo = (rawTtsSec / targetSlotSec).clamp(1.01, 1.72);
+          targetTempo = (rawTtsSec / targetSlotSec).clamp(1.01, 1.82);
         }
 
         final int charSampleRate = (24000 * charPitchShift).round();
@@ -6813,7 +6866,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             : 'equalizer=f=280:width_type=o:width=2:g=1.8';
 
         final String filterChain =
-            'aresample=24000,asetrate=$charSampleRate,aresample=24000,atempo=${compensatedTempo.toStringAsFixed(3)},$eqBoost,volume=1.45';
+            'silenceremove=start_periods=1:start_duration=0.005:start_threshold=-40dB,aresample=24000,asetrate=$charSampleRate,aresample=24000,atempo=${compensatedTempo.toStringAsFixed(3)},$eqBoost,volume=1.45';
 
         final segWavPath = '${tempDir.path}/seq_voice_$i.wav';
         final voiceSess = await FFmpegKit.execute(
@@ -6834,7 +6887,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
           }
         }
         // Absolute timestamp lock: anchor timeline strictly to segment start + actual audio duration
-        currentTimelineMs = seg.startMs + ((actualSec * 1000).round()); if (currentTimelineMs > seg.endMs) { seg.endMs = currentTimelineMs; } if (currentTimelineMs > seg.endMs) { seg.endMs = currentTimelineMs; }
+        currentTimelineMs = (await File(masterPcmPath).length()) ~/ 48; if (currentTimelineMs > seg.endMs) { seg.endMs = currentTimelineMs; } if (currentTimelineMs > seg.endMs) { seg.endMs = currentTimelineMs; }
 
         if (await File(rawTtsPath).exists()) await File(rawTtsPath).delete();
         if (await File(segWavPath).exists()) await File(segWavPath).delete();

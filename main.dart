@@ -5511,7 +5511,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                   const SizedBox(height: 8),
                   StatefulBuilder(
                     builder: (ctx, setEngineState) => Container(
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
                       decoration: BoxDecoration(
                         color: const Color(0xFF121D1A),
                         borderRadius: BorderRadius.circular(10),
@@ -5531,7 +5531,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                                 child: InkWell(
                                   onTap: () => setEngineState(() => _globalUseNeuralStemAi = false),
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                                    padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
                                     decoration: BoxDecoration(
                                       color: !_globalUseNeuralStemAi ? const Color(0xFF1F4E43) : const Color(0xFF1A2421),
                                       borderRadius: BorderRadius.circular(8),
@@ -5556,7 +5556,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                                 child: InkWell(
                                   onTap: () => setEngineState(() => _globalUseNeuralStemAi = true),
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                                    padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
                                     decoration: BoxDecoration(
                                       color: _globalUseNeuralStemAi ? const Color(0xFF173F4E) : const Color(0xFF1A2421),
                                       borderRadius: BorderRadius.circular(8),

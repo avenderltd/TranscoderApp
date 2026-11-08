@@ -5381,7 +5381,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               insetPadding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
               title: const Text(
-                "AI Voice & Dubbing Studio (ElevenLabs / Fish)",
+                "AI Voice & Dubbing Studio",
                 style: TextStyle(
                     color: Colors.tealAccent,
                     fontSize: 17,
@@ -5464,7 +5464,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 0),
                         title: const Text(
-                          "🎭 Clone Speaker via ElevenLabs / Fish Audio Key",
+                          "🎭 Clone Speaker (ElevenLabs / Fish)",
                           style: TextStyle(
                               color: Colors.tealAccent,
                               fontWeight: FontWeight.bold,
@@ -5473,7 +5473,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         subtitle: Text(
                           autoCloneVideoSpeaker
                               ? "Extracts 5s speaker clip, measures Hz, & clones voice"
-                              : "Auto-detects Male/Female per speaker & assigns unique character voices",
+                              : "Auto-detects Male/Female & unique voices",
                           style: const TextStyle(
                               color: Colors.white60, fontSize: 10.5),
                         ),
@@ -5508,22 +5508,51 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                             setModalState(() => keepBackgroundAudio = val),
                       ),
                     ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 4),
                   StatefulBuilder(
                     builder: (ctx, setEngineState) => Container(
-                      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 6),
                       decoration: BoxDecoration(
                         color: const Color(0xFF121D1A),
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: Colors.tealAccent.withOpacity(0.35)),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      child: Row(
                         children: [
-                          const Text(
-                            "🎵 BGM & SFX Vocal Separation Engine:",
-                            style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                          const Text("🎵 BGM AI: ", style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                          Expanded(
+                            child: InkWell(
+                              onTap: () => setEngineState(() => _globalUseNeuralStemAi = false),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+                                decoration: BoxDecoration(
+                                  color: !_globalUseNeuralStemAi ? const Color(0xFF1F4E43) : const Color(0xFF1A2421),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: !_globalUseNeuralStemAi ? Colors.tealAccent : Colors.white24),
+                                ),
+                                child: const Text("⚡ Light (<350MB)", textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                              ),
+                            ),
                           ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: InkWell(
+                              onTap: () => setEngineState(() => _globalUseNeuralStemAi = true),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+                                decoration: BoxDecoration(
+                                  color: _globalUseNeuralStemAi ? const Color(0xFF173F4E) : const Color(0xFF1A2421),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: _globalUseNeuralStemAi ? Colors.cyanAccent : Colors.white24),
+                                ),
+                                child: const Text("🧠 Neural €20 (2-3.5GB)", textAlign: TextAlign.center, style: TextStyle(color: Colors.cyanAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                           const SizedBox(height: 8),
                           Row(
                             children: [
@@ -5641,7 +5670,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                           SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              "🤖 Auto-Detect Male/Female & Multi-Character Voices (Active)",
+                              "🤖 Auto-Detect Male/Female & Multi-Voice (Active)",
                               style: TextStyle(
                                 color: Colors.tealAccent,
                                 fontWeight: FontWeight.bold,

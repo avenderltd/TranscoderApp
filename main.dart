@@ -5381,7 +5381,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               insetPadding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
               title: const Text(
-                "AI Voice & Dubbing Studio",
+                "AI Voice & Dubbing Studio (ElevenLabs / Fish)",
                 style: TextStyle(
                     color: Colors.tealAccent,
                     fontSize: 17,
@@ -5389,7 +5389,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               ),
               content: SizedBox(
                 width: double.maxFinite,
-                height: 550,
+                height: 680,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -5464,7 +5464,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 0),
                         title: const Text(
-                          "🎭 Clone Speaker (ElevenLabs / Fish)",
+                          "🎭 Clone Speaker via ElevenLabs / Fish Audio Key",
                           style: TextStyle(
                               color: Colors.tealAccent,
                               fontWeight: FontWeight.bold,
@@ -5473,7 +5473,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         subtitle: Text(
                           autoCloneVideoSpeaker
                               ? "Extracts 5s speaker clip, measures Hz, & clones voice"
-                              : "Auto-detects Male/Female & unique voices",
+                              : "Auto-detects Male/Female per speaker & assigns unique character voices",
                           style: const TextStyle(
                               color: Colors.white60, fontSize: 10.5),
                         ),
@@ -5508,7 +5508,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                             setModalState(() => keepBackgroundAudio = val),
                       ),
                     ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 5),
                   StatefulBuilder(
                     builder: (ctx, setEngineState) => Container(
                       padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 6),
@@ -5553,65 +5553,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                       ),
                     ),
                   ),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: InkWell(
-                                  onTap: () => setEngineState(() => _globalUseNeuralStemAi = false),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
-                                    decoration: BoxDecoration(
-                                      color: !_globalUseNeuralStemAi ? const Color(0xFF1F4E43) : const Color(0xFF1A2421),
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(
-                                        color: !_globalUseNeuralStemAi ? Colors.tealAccent : Colors.white24,
-                                        width: !_globalUseNeuralStemAi ? 1.5 : 1.0,
-                                      ),
-                                    ),
-                                    child: const Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text("⚡ Light Hybrid", style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                                        SizedBox(height: 2),
-                                        Text("<350MB RAM • Fast (All Phones)", style: TextStyle(color: Colors.white70, fontSize: 10)),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: InkWell(
-                                  onTap: () => setEngineState(() => _globalUseNeuralStemAi = true),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
-                                    decoration: BoxDecoration(
-                                      color: _globalUseNeuralStemAi ? const Color(0xFF173F4E) : const Color(0xFF1A2421),
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(
-                                        color: _globalUseNeuralStemAi ? Colors.cyanAccent : Colors.white24,
-                                        width: _globalUseNeuralStemAi ? 1.5 : 1.0,
-                                      ),
-                                    ),
-                                    child: const Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text("🧠 Neural Stem AI • €20", style: TextStyle(color: Colors.cyanAccent, fontSize: 12, fontWeight: FontWeight.bold)),
-                                        SizedBox(height: 2),
-                                        Text("2–3.5GB RAM • Mono & Stereo", style: TextStyle(color: Colors.white70, fontSize: 10)),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 5),
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: Row(
@@ -5670,7 +5612,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                           SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              "🤖 Auto-Detect Male/Female & Multi-Voice (Active)",
+                              "🤖 Auto-Detect Male/Female & Multi-Character Voices (Active)",
                               style: TextStyle(
                                 color: Colors.tealAccent,
                                 fontWeight: FontWeight.bold,
@@ -5756,7 +5698,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 5),
                     TextField(
                       style:
                           const TextStyle(color: Colors.white, fontSize: 13),

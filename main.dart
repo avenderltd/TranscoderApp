@@ -34,6 +34,11 @@ import 'package:file_picker/file_picker.dart';
 
 bool _globalUseNeuralStemAi = true;
 
+final TextEditingController _topUpCodeController = TextEditingController();
+final Set<String> _redeemedUsedCodesMem = {};
+final Set<String> _validKeys110 = {'CREATOR8-060AD9', 'CREATOR8-0A1787', 'CREATOR8-0CCF1F', 'CREATOR8-0E14F7', 'CREATOR8-0FBF9B', 'CREATOR8-19BBD7', 'CREATOR8-213A44', 'CREATOR8-254C1C', 'CREATOR8-28DF12', 'CREATOR8-2D7451', 'CREATOR8-3064C0', 'CREATOR8-32B454', 'CREATOR8-37C4DE', 'CREATOR8-455EF0', 'CREATOR8-45CD8B', 'CREATOR8-469370', 'CREATOR8-511396', 'CREATOR8-539D88', 'CREATOR8-6111ED', 'CREATOR8-6808CF', 'CREATOR8-6A750F', 'CREATOR8-788E46', 'CREATOR8-7CCEA0', 'CREATOR8-7D7B2B', 'CREATOR8-804FA4', 'CREATOR8-84EF0A', 'CREATOR8-857B4C', 'CREATOR8-89A419', 'CREATOR8-8B11AA', 'CREATOR8-8EE76B', 'CREATOR8-8F528D', 'CREATOR8-A7C728', 'CREATOR8-AC4BC6', 'CREATOR8-B13810', 'CREATOR8-BA49B7', 'CREATOR8-BB8283', 'CREATOR8-BD38ED', 'CREATOR8-C59D2D', 'CREATOR8-C86986', 'CREATOR8-C9E38B', 'CREATOR8-CC68F9', 'CREATOR8-CCF9CD', 'CREATOR8-D03B3E', 'CREATOR8-D0A115', 'CREATOR8-E0A5B8', 'CREATOR8-EC4705', 'CREATOR8-F069BA', 'CREATOR8-F30081', 'CREATOR8-F9CC9C', 'CREATOR8-FD48F9', 'PRO20-00E182', 'PRO20-136226', 'PRO20-1B7732', 'PRO20-2921FE', 'PRO20-29B55B', 'PRO20-320AE6', 'PRO20-36ED61', 'PRO20-3F3BBB', 'PRO20-462284', 'PRO20-47EB7F', 'PRO20-4B3DD2', 'PRO20-55C58D', 'PRO20-5D0F21', 'PRO20-61D8AC', 'PRO20-6CE13D', 'PRO20-6DA6A2', 'PRO20-6EC865', 'PRO20-7725B0', 'PRO20-7B9F84', 'PRO20-802225', 'PRO20-824DF3', 'PRO20-8B1810', 'PRO20-8FCAEF', 'PRO20-96AE6B', 'PRO20-96B762', 'PRO20-A49D64', 'PRO20-A6A645', 'PRO20-AD69C9', 'PRO20-ADCD77', 'PRO20-AE1628', 'PRO20-AEDF71', 'PRO20-AF24D3', 'PRO20-BCE64E', 'PRO20-BE9D48', 'PRO20-C7BC8D', 'PRO20-CA1252', 'PRO20-CACA8E', 'PRO20-CE97A4', 'PRO20-D08B8F', 'PRO20-D83BA1', 'PRO20-DCE57D', 'PRO20-DD5921', 'PRO20-E1A5EF', 'PRO20-E61F13', 'PRO20-E7293A', 'PRO20-E8027F', 'PRO20-E84E4F', 'PRO20-EC8BC8', 'PRO20-ED36CF', 'PRO20-F08CB4', 'SINGLE-USE', 'STUDIOVIP-01F240', 'STUDIOVIP-079E0F', 'STUDIOVIP-3EFAF3', 'STUDIOVIP-63F877', 'STUDIOVIP-6F3475', 'STUDIOVIP-81197E', 'STUDIOVIP-AC7813', 'STUDIOVIP-BDD981', 'STUDIOVIP-DC235E', 'STUDIOVIP-E5A60D'};
+final Set<String> _validKeys150 = {'AGENCY1000-2F4329', 'AGENCY1000-73D4F9', 'AGENCY1000-9D8E21', 'AGENCY1000-ADEC2C', 'AGENCY1000-B2D2C0', 'AGENCY1000-BB2768', 'AGENCY1000-CE2913', 'AGENCY1000-D472D1', 'AGENCY1000-E3CE45', 'AGENCY1000-E68AE4', 'BOOST100-019F5A', 'BOOST100-01EE93', 'BOOST100-06CC70', 'BOOST100-268EE6', 'BOOST100-27BCAE', 'BOOST100-377061', 'BOOST100-65B079', 'BOOST100-6CF016', 'BOOST100-73CCC4', 'BOOST100-83A3A7', 'BOOST100-86FBBB', 'BOOST100-8C6411', 'BOOST100-8D65E5', 'BOOST100-8D90FE', 'BOOST100-A306E7', 'BOOST100-A53C6C', 'BOOST100-AEB00C', 'BOOST100-BA81D3', 'BOOST100-BD59AE', 'BOOST100-C4C093', 'BOOST100-CD302D', 'BOOST100-E84ABB', 'BOOST100-EAE5F5', 'BOOST100-EBE4E7', 'BOOST100-FD249F', 'CREATOR8-0A898C', 'CREATOR8-0AC3DE', 'CREATOR8-11B42D', 'CREATOR8-129BA1', 'CREATOR8-1B0A18', 'CREATOR8-1CAFB0', 'CREATOR8-1F98F9', 'CREATOR8-2444E4', 'CREATOR8-3AA0CE', 'CREATOR8-42C894', 'CREATOR8-47B0AE', 'CREATOR8-498CE5', 'CREATOR8-4B1E55', 'CREATOR8-557C9F', 'CREATOR8-612474', 'CREATOR8-741CA8', 'CREATOR8-808CA4', 'CREATOR8-91159C', 'CREATOR8-91FEBF', 'CREATOR8-922D1C', 'CREATOR8-9B800E', 'CREATOR8-9BB5CA', 'CREATOR8-9BD641', 'CREATOR8-AC9F4A', 'CREATOR8-ACE2FD', 'CREATOR8-AE8E88', 'CREATOR8-AFC404', 'CREATOR8-B027EA', 'CREATOR8-B4780E', 'CREATOR8-B84E03', 'CREATOR8-B9923A', 'CREATOR8-C1A23E', 'CREATOR8-C80BD4', 'CREATOR8-C9DE10', 'CREATOR8-CF59BF', 'CREATOR8-D9BE38', 'CREATOR8-DD12FB', 'CREATOR8-E2F087', 'CREATOR8-EAE563', 'CREATOR8-F85E2B', 'ENTERPRISE3000-1A4DE1', 'ENTERPRISE3000-3A57EC', 'ENTERPRISE3000-4CE435', 'ENTERPRISE3000-614DD6', 'ENTERPRISE3000-ACEB56', 'ENTERPRISE3000-AD354D', 'ENTERPRISE3000-B42804', 'ENTERPRISE3000-B65858', 'ENTERPRISE3000-C47E08', 'ENTERPRISE3000-D004D3', 'PRO20-011722', 'PRO20-0751D7', 'PRO20-0C0320', 'PRO20-0D6C57', 'PRO20-1654A1', 'PRO20-18836F', 'PRO20-1CE13F', 'PRO20-20761A', 'PRO20-24FADA', 'PRO20-2A0FF1', 'PRO20-34B03A', 'PRO20-37DFF1', 'PRO20-4F00A3', 'PRO20-529853', 'PRO20-571095', 'PRO20-577E5D', 'PRO20-661429', 'PRO20-6CA386', 'PRO20-7AD5A4', 'PRO20-7CDDBF', 'PRO20-8B0931', 'PRO20-8E09F7', 'PRO20-994A15', 'PRO20-995A78', 'PRO20-A541FF', 'PRO20-A5C7A7', 'PRO20-A5D7A3', 'PRO20-AAF45C', 'PRO20-AE640E', 'PRO20-B74D17', 'PRO20-CB4EBE', 'PRO20-CF3249', 'PRO20-D76AD2', 'PRO20-DE9981', 'PRO20-E41406', 'PRO20-E63715', 'PRO20-EB3FF3', 'PRO20-EC415B', 'PRO20-F6764A', 'PRO20-F68CFE', 'REFILL300-042ABD', 'REFILL300-123899', 'REFILL300-16A9D5', 'REFILL300-1DC730', 'REFILL300-2BB636', 'REFILL300-2DC0BC', 'REFILL300-432548', 'REFILL300-482A91', 'REFILL300-5E6822', 'REFILL300-62387E', 'REFILL300-683FA4', 'REFILL300-8AEDDF', 'REFILL300-978399', 'REFILL300-AA7356', 'REFILL300-B333A0', 'REFILL300-BA945F', 'REFILL300-C14789', 'REFILL300-C30216', 'REFILL300-E07D19', 'REFILL300-E34B01', 'REFILL300-E6144F', 'REFILL300-E7181D', 'REFILL300-F292D8', 'REFILL300-F591C0', 'REFILL300-F59E7B'};
+
 void main() => runApp(const TranscoderApp());
 
 class TranscoderApp extends StatelessWidget {
@@ -6474,6 +6479,37 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
 
       final int wavFileBytes = await File(tempWavPath).length();
       final int totalAudioMs = ((wavFileBytes - 44) ~/ 32).clamp(1000, 14400000);
+      final int exactVideoMins = (totalAudioMs / 60000.0).ceil().clamp(1, 1440);
+      if (!await step2CkptFile.exists() && !await step4CkptFile.exists()) {
+        final int deltaMins = exactVideoMins - 5;
+        if (deltaMins > _dubbingMinutesRemaining) {
+          setState(() {
+            _dubbingMinutesRemaining += 5;
+            _isProcessing = false;
+            _statusMessage = "Not enough Cloud Quota ($exactVideoMins mins required, $_dubbingMinutesRemaining mins available).";
+          });
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text("❌ Video is $exactVideoMins mins long, but you only have $_dubbingMinutesRemaining mins left. Please redeem a top-up code!"),
+                duration: const Duration(seconds: 6),
+              ),
+            );
+          }
+          return;
+        }
+        setState(() {
+          _dubbingMinutesRemaining = (_dubbingMinutesRemaining - deltaMins).clamp(0, 999999);
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("🎬 Video is $exactVideoMins mins: Deducted $exactVideoMins mins total from Cloud quota ($_dubbingMinutesRemaining mins left)."),
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+      }
       const int targetSliceSpanMs = 27500;
       final String chunkWavPath = '${tempDir.path}/whisper_slice_16k.wav';
 
@@ -9581,6 +9617,97 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                     ],
                   ),
                 ),
+              const SizedBox(height: 8),
+              StatefulBuilder(
+                builder: (ctx, setRedeemState) => Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF14221E),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.amberAccent.withOpacity(0.45)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        "🔑 Redeem Purchased Top-Up / Starter Code:",
+                        style: TextStyle(color: Colors.amberAccent, fontSize: 11.5, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: SizedBox(
+                              height: 36,
+                              child: TextField(
+                                controller: _topUpCodeController,
+                                style: const TextStyle(color: Colors.white, fontSize: 12),
+                                decoration: InputDecoration(
+                                  hintText: "Enter code to add minutes...",
+                                  hintStyle: const TextStyle(color: Colors.white38, fontSize: 11),
+                                  filled: true,
+                                  fillColor: const Color(0xFF0D1513),
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    borderSide: const BorderSide(color: Colors.white24),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF1E6B52),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                            onPressed: () {
+                              final String code = _topUpCodeController.text.trim().toUpperCase();
+                              if (code.isEmpty) return;
+                              if (_redeemedUsedCodesMem.contains(code)) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text("⚠️ This code has already been redeemed.")),
+                                );
+                                return;
+                              }
+                              int addMins = 0;
+                              if (_validKeys150.contains(code) || code.startsWith("AVD150-") || code.startsWith("PRO150-")) {
+                                addMins = 150;
+                              } else if (_validKeys110.contains(code) || code.startsWith("AVD110-") || code.startsWith("START110-")) {
+                                addMins = 110;
+                              } else if (code.startsWith("AVD250-") || code.startsWith("PRO250-")) {
+                                addMins = 250;
+                              } else if (code.startsWith("AVD60-")) {
+                                addMins = 60;
+                              }
+                              if (addMins > 0) {
+                                _redeemedUsedCodesMem.add(code);
+                                setState(() {
+                                  _dubbingMinutesRemaining += addMins;
+                                });
+                                setRedeemState(() {});
+                                _topUpCodeController.clear();
+                                Navigator.of(ctx).pop();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text("✅ Code redeemed! Added +$addMins Mins to your Cloud Quota.")),
+                                );
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text("❌ Invalid top-up code. Please check and try again.")),
+                                );
+                              }
+                            },
+                            child: const Text("Redeem", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
                 const SizedBox(height: 10),
                 _buildPlanTile(
                   "Free Tier (€0/mo)",

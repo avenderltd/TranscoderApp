@@ -24,7 +24,7 @@ jobs:
           sed -i 's/flutter.minSdkVersion/28/g' app/android/app/build.gradle.kts
           sed -i 's/flutter.compileSdkVersion/37/g' app/android/app/build.gradle.kts
 
-      - name: Build APK
+      - name: Build APK & Play Store AppBundle
         run: |
           yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
           cd app
@@ -39,4 +39,10 @@ jobs:
           name: android-release-apks
           path: |
             app/build/app/outputs/flutter-apk/app-*-release.apk
-            build/app/outputs/bundle/release/*.aab
+            app/build/app/outputs/bundle/release/app-release.aab
+
+      - name: Upload Play Store AAB Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: play-store-aab
+          path: app/build/app/outputs/bundle/release/app-release.aab

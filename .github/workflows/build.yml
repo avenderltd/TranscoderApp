@@ -31,11 +31,12 @@ jobs:
           flutter pub get
           find /home/runner/.pub-cache/ -name "build.gradle*" -exec sed -i 's/compileSdkVersion [0-9][0-9]/compileSdkVersion 37/g; s/compileSdk [0-9][0-9]/compileSdk 37/g; s/compileSdk = [0-9][0-9]/compileSdk = 37/g' {} +
           flutter build apk --release --split-per-abi
-        flutter build appbundle --release
+          flutter build appbundle --release
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: android-release-apks
-          path: app/build/app/outputs/flutter-apk/app-*-release.apk
+          path: |
+            app/build/app/outputs/flutter-apk/app-*-release.apk
             build/app/outputs/bundle/release/*.aab

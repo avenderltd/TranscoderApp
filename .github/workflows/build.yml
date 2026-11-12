@@ -38,3 +38,4 @@ jobs:
         with:
           name: android-release-apks
           path: app/build/app/outputs/flutter-apk/app-*-release.apk
+            build/app/outputs/bundle/release/*.aab

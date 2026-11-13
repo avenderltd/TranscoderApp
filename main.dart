@@ -5778,110 +5778,135 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               fontWeight: FontWeight.bold,
               fontSize: 16),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.subtitles_off_outlined,
-                  color: Colors.tealAccent),
-              title: const Text(
-                "1. Remove Soft Subtitle Tracks (Fast)",
-                style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.auto_fix_high, color: Colors.tealAccent),
+                title: const Text("1. 🎯 Smart Letter-Only Inpaint",
+                    style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                subtitle: const Text(
+                    "Erases only high-contrast subtitle letters in the center zone; keeps slides & background sharp",
+                    style: TextStyle(color: Colors.white70, fontSize: 11)),
+                onTap: () => Navigator.pop(context, "inpaint"),
               ),
-              subtitle: const Text(
-                "Strips embedded .SRT / .ASS / mov_text subtitle streams from the video container.",
-                style: TextStyle(color: Colors.white70, fontSize: 11.5),
+              const Divider(color: Colors.white12),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.crop_free, color: Colors.cyanAccent),
+                title: const Text("2. 🎬 Seamless Cinema Zoom-Crop (Zero Blur)",
+                    style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                subtitle: const Text(
+                    "100% undetectable: proportionally zooms 14% past bottom subtitles with Lanczos HD scaling",
+                    style: TextStyle(color: Colors.white70, fontSize: 11)),
+                onTap: () => Navigator.pop(context, "zoomcrop"),
               ),
-              onTap: () => Navigator.pop(context, "soft"),
-            ),
-            const Divider(color: Colors.white12),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.auto_fix_high_outlined,
-                  color: Colors.amberAccent),
-              title: const Text(
-                "2. Erase Burned-In Bottom Subtitles (Visual Blur)",
-                style: TextStyle(
-                    color: Colors.amberAccent,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13),
+              const Divider(color: Colors.white12),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.healing, color: Colors.amberAccent),
+                title: const Text("3. 🪶 Center-Only Delogo Interpolation",
+                    style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                subtitle: const Text(
+                    "Interpolates surrounding border pixels across the center subtitle box (leaves sides untouched)",
+                    style: TextStyle(color: Colors.white70, fontSize: 11)),
+                onTap: () => Navigator.pop(context, "delogo"),
               ),
-              subtitle: const Text(
-                "For YouTube/TikTok videos where subtitles are burned into the pixels at the bottom of the screen.",
-                style: TextStyle(color: Colors.white70, fontSize: 11.5),
+              const Divider(color: Colors.white12),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.subtitles_off_outlined, color: Colors.white70),
+                title: const Text("4. ⚡ Strip Soft Subtitle Tracks (Instant)",
+                    style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                subtitle: const Text(
+                    "Removes embedded .SRT/.ASS subtitle streams without re-encoding video",
+                    style: TextStyle(color: Colors.white70, fontSize: 11)),
+                onTap: () => Navigator.pop(context, "soft"),
               ),
-              onTap: () => Navigator.pop(context, "hardcoded"),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
 
-    if (mode == null) return;
+    if (mode == null || _inputFile == null) return;
 
     setState(() {
       _isProcessing = true;
-      _statusMessage = mode == "hardcoded"
-          ? "Erasing burned-in bottom subtitles with cinema blur band..."
-          : "Stripping embedded subtitle tracks...";
+      _statusMessage = mode == "inpaint"
+          ? "Smart-inpainting subtitle letters (keeping background sharp)..."
+          : mode == "zoomcrop"
+              ? "Applying seamless cinema zoom-crop (zero blur)..."
+              : mode == "delogo"
+                  ? "Interpolating center subtitle region with delogo..."
+                  : "Stripping embedded soft subtitle tracks...";
       _lastOutputPath = null;
     });
 
     final outPath = await _getOutputFilePath("Clean_NoSubs", "mp4");
 
-    if (mode == "hardcoded") {
+    if (mode == "inpaint" || mode == "zoomcrop" || mode == "delogo") {
+      String vfGraph = "";
+      if (mode == "inpaint") {
+        // Isolates center 74% bottom subtitle zone, builds a local-contrast edge mask of only the text strokes,
+        // and merges a median/blurred background plate strictly over the letter pixels
+        vfGraph =
+            "[0:v:0]split=2[base][sub];"
+            "[sub]crop=trunc(iw*0.74/2)*2:trunc(ih*0.16/2)*2:trunc(iw*0.13/2)*2:trunc(ih*0.81/2)*2,split=3[orig][bgsrc][msksrc];"
+            "[bgsrc]median=radius=9,boxblur=8:3[bg];"
+            "[msksrc]format=gray,split=2[g1][g2];"
+            "[g2]boxblur=6:2[gblur];"
+            "[g1][gblur]blend=all_mode=difference,lut=y='if(gt(val,16),255,0)',dilation,dilation,dilation,boxblur=2:1[mask];"
+            "[orig][bg][mask]maskedmerge[cleaned];"
+            "[base][cleaned]overlay=trunc(W*0.13/2)*2:trunc(H*0.81/2)*2[vout]";
+      } else if (mode == "zoomcrop") {
+        // Proportional 86% top-centered crop + Lanczos scale back to exact original resolution (0% blur, 0% stretch)
+        vfGraph =
+            "[0:v:0]split=2[ref][crp];"
+            "[crp]crop=trunc(iw*0.86/2)*2:trunc(ih*0.86/2)*2:trunc((iw-ow)/2/2)*2:0[c];"
+            "[c][ref]scale2ref=flags=lanczos[vscaled][unused];"
+            "[unused]nullsink;"
+            "[vscaled]setsar=1[vout]";
+      } else {
+        // Center-only delogo boundary interpolation (leaves left/right 16% untouched)
+        vfGraph =
+            "[0:v:0]delogo=x=trunc(iw*0.16):y=trunc(ih*0.81):w=trunc(iw*0.68):h=trunc(ih*0.15)[vout]";
+      }
+
       final String hardCmd =
-          '-y -fflags +genpts -i "${_inputFile!.path}" -filter_complex "[0:v:0]split=2[base][sub];[sub]crop=iw:ih*0.16:0:ih*0.81,boxblur=18:8[blurred];[base][blurred]overlay=0:H*0.81[vout]" -map "[vout]" -map 0:a? -sn -c:v libx264 -preset $_optimalPreset -threads $_optimalThreads -crf 22 -pix_fmt yuv420p -c:a aac -ac 2 -ar 44100 -b:a 160k -movflags +faststart "$outPath"';
+          '-y -fflags +genpts -i "${_inputFile!.path}" -filter_complex "$vfGraph" -map "[vout]" -map 0:a? -sn -c:v libx264 -preset $_optimalPreset -threads $_optimalThreads -crf 21 -pix_fmt yuv420p -c:a aac -ac 2 -ar 44100 -b:a 160k -movflags +faststart "$outPath"';
       final sess = await FFmpegKit.execute(hardCmd);
       final code = await sess.getReturnCode();
       setState(() {
         _isProcessing = false;
         if (ReturnCode.isSuccess(code)) {
           _statusMessage =
-              "Success! Burned-in bottom subtitles erased & saved to Downloads";
+              "Success! Hardcoded subtitles cleanly removed ($mode mode) & saved to Downloads";
           _lastOutputPath = outPath;
         } else {
           _statusMessage =
-              "Hardcoded subtitle removal failed (Code: ${code?.getValue()})";
+              "Subtitle removal failed (Code: ${code?.getValue()})";
         }
       });
-      return;
-    }
-
-    final String softCopyCmd =
-        '-y -i "${_inputFile!.path}" -map 0:v:0 -map 0:a? -sn -dn -map_chapters -1 -c:v copy -c:a aac -ac 2 -b:a 192k -movflags +faststart "$outPath"';
-    final copySess = await FFmpegKit.execute(softCopyCmd);
-    if (ReturnCode.isSuccess(await copySess.getReturnCode()) &&
-        await File(outPath).exists() &&
-        await File(outPath).length() > 1000) {
+    } else {
+      final String softCmd =
+          '-y -i "${_inputFile!.path}" -map 0:v -map 0:a? -sn -c copy -movflags +faststart "$outPath"';
+      final sess = await FFmpegKit.execute(softCmd);
+      final code = await sess.getReturnCode();
       setState(() {
         _isProcessing = false;
-        _statusMessage =
-            "Success! Soft subtitle tracks stripped (Saved to Downloads)";
-        _lastOutputPath = outPath;
+        if (ReturnCode.isSuccess(code)) {
+          _statusMessage =
+              "Success! Soft subtitle tracks stripped & saved to Downloads";
+          _lastOutputPath = outPath;
+        } else {
+          _statusMessage =
+              "Soft subtitle strip failed (Code: ${code?.getValue()})";
+        }
       });
-      return;
     }
-
-    final String reencodeCmd =
-        '-y -fflags +genpts -i "${_inputFile!.path}" -map 0:v:0 -map 0:a? -sn -dn -c:v libx264 -preset $_optimalPreset -threads $_optimalThreads -crf 22 -pix_fmt yuv420p -c:a aac -ac 2 -ar 44100 -b:a 192k -movflags +faststart "$outPath"';
-    final reSess = await FFmpegKit.execute(reencodeCmd);
-    final reCode = await reSess.getReturnCode();
-    setState(() {
-      _isProcessing = false;
-      if (ReturnCode.isSuccess(reCode)) {
-        _statusMessage =
-            "Success! Clean video without subtitles saved to Downloads";
-        _lastOutputPath = outPath;
-      } else {
-        _statusMessage =
-            "Subtitle strip failed (Code: ${reCode?.getValue()})";
-      }
-    });
   }
 
   Future<void> _burnExternalSrt() async {

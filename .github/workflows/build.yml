@@ -30,7 +30,7 @@ jobs:
               -alias upload \
               -storepass avender2026 \
               -keypass avender2026 \
-              -dname "CN=Avender Ltd, OU=Mobile, O=Avender Ltd, L=Recklinghausen, ST=NRW, C=DE"
+              -dname "CN=Avender Ltd, OU=Mobile, O=Avender Ltd, C=GB"
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add upload-keystore.jks

@@ -1,30 +1,75 @@
-name: Build Android APK
+name: Build Android APK & Play Store Bundle
 on:
   push:
     branches: [ main ]
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - uses: actions/setup-java@v3
         with:
           distribution: 'zulu'
           java-version: '17'
+
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
 
-      - name: Create Base Flutter App & Inject Code
+      - name: Ensure Permanent Play Store Upload Keystore Exists
         run: |
-          flutter create app
+          if [ ! -f upload-keystore.jks ]; then
+            keytool -genkey -v \
+              -keystore upload-keystore.jks \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -alias upload \
+              -storepass avender2026 \
+              -keypass avender2026 \
+              -dname "CN=Avender Ltd, OU=Mobile, O=Avender Ltd, L=Recklinghausen, ST=NRW, C=DE"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add upload-keystore.jks
+            git commit -m "Save permanent Play Store upload-keystore.jks [skip ci]" || true
+            git push origin HEAD:main || true
+          fi
+
+      - name: Create Base Flutter App, Set Package ID & Configure Release Signing
+        run: |
+          flutter create --org com.avenderltd app
           cp pubspec.yaml app/pubspec.yaml
           cp main.dart app/lib/main.dart
           cp AndroidManifest.xml app/android/app/src/main/AndroidManifest.xml
-          sed -i 's/flutter.minSdkVersion/28/g' app/android/app/build.gradle.kts
-          sed -i 's/flutter.compileSdkVersion/37/g' app/android/app/build.gradle.kts
+          cp upload-keystore.jks app/android/app/upload-keystore.jks
+          python3 - << 'PYEOF'
+          import pathlib
+          p = pathlib.Path("app/android/app/build.gradle.kts")
+          c = p.read_text()
+          c = c.replace("flutter.minSdkVersion", "28")
+          c = c.replace("flutter.compileSdkVersion", "37")
+          c = c.replace("flutter.targetSdkVersion", "35")
+          c = c.replace('applicationId = "com.avenderltd.app"', 'applicationId = "com.avenderltd.transcoderapp"')
+          c = c.replace('applicationId = "com.example.app"', 'applicationId = "com.avenderltd.transcoderapp"')
+          signing_block = """
+              signingConfigs {
+                  create("release") {
+                      keyAlias = "upload"
+                      keyPassword = "avender2026"
+                      storeFile = file("upload-keystore.jks")
+                      storePassword = "avender2026"
+                  }
+              }
+              buildTypes {"""
+          c = c.replace("    buildTypes {", signing_block, 1)
+          c = c.replace('signingConfigs.getByName("debug")', 'signingConfigs.getByName("release")')
+          p.write_text(c)
+          PYEOF
 
-      - name: Build APK & Play Store AppBundle
+      - name: Build Signed APKs & Play Store AppBundle
         run: |
           yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses || true
           cd app
@@ -33,7 +78,7 @@ jobs:
           flutter build apk --release --split-per-abi
           flutter build appbundle --release
 
-      - name: Upload APKs
+      - name: Upload Signed APKs
         uses: actions/upload-artifact@v4
         with:
           name: android-release-apks
@@ -41,8 +86,10 @@ jobs:
             app/build/app/outputs/flutter-apk/app-*-release.apk
             app/build/app/outputs/bundle/release/app-release.aab
 
-      - name: Upload Play Store AAB Bundle
+      - name: Upload Signed Play Store AAB Bundle
         uses: actions/upload-artifact@v4
         with:
           name: play-store-aab
-          path: app/build/app/outputs/bundle/release/app-release.aab
+          path: |
+            app/build/app/outputs/bundle/release/app-release.aab
+            upload-keystore.jks

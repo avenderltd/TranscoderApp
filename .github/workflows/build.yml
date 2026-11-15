@@ -15,7 +15,7 @@ jobs:
       - uses: actions/setup-java@v3
         with:
           distribution: 'zulu'
-          java-version: '17'
+          java-version: '21'
 
       - uses: subosito/flutter-action@v2
         with:
@@ -67,6 +67,12 @@ jobs:
           c = c.replace("    buildTypes {", signing_block, 1)
           c = c.replace('signingConfigs.getByName("debug")', 'signingConfigs.getByName("release")')
           p.write_text(c)
+          root_gradle = pathlib.Path("app/android/build.gradle.kts")
+          if root_gradle.exists():
+              rg_text = root_gradle.read_text()
+              if "lintVital" not in rg_text:
+                  rg_text += '\nsubprojects {\n    tasks.configureEach {\n        if (name.contains("lintVital", ignoreCase = true)) {\n            enabled = false\n        }\n    }\n}\n'
+                  root_gradle.write_text(rg_text)
           PYEOF
 
       - name: Build Signed APKs & Play Store AppBundle

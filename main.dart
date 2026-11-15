@@ -9259,6 +9259,29 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (_signedInUserEmail != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: Colors.redAccent),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                        ),
+                        icon: const Icon(Icons.delete_forever_rounded, color: Colors.redAccent, size: 16),
+                        label: const Text(
+                          "Delete Account & Cloud Data",
+                          style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 11.5),
+                        ),
+                        onPressed: () async {
+                          await _confirmAndDeleteCloudAccount(() {
+                            if (ctx.mounted) Navigator.pop(ctx);
+                          });
+                        },
+                      ),
+                    ),
+                  ),
                 Container(
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
@@ -9590,6 +9613,100 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     return signedIn;
   }
 
+  Future<void> _confirmAndDeleteCloudAccount(VoidCallback onRefresh) async {
+    if (_signedInUserEmail == null) return;
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: Colors.redAccent, width: 1),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.delete_forever_rounded, color: Colors.redAccent, size: 22),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                "Delete Studio Cloud Account?",
+                style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          "This will permanently delete your Studio Cloud account ($_signedInUserEmail), your Firebase Authentication profile, and your Cloud Quota balance ($_dubbingMinutesRemaining Mins).\n\nThis action is immediate and cannot be undone.",
+          style: const TextStyle(color: Colors.white70, fontSize: 12.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, false),
+            child: const Text("Cancel", style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            icon: const Icon(Icons.delete_forever_rounded, size: 16),
+            label: const Text("Delete Permanently", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+            onPressed: () => Navigator.pop(dCtx, true),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+    try {
+      await _refreshFirebaseTokenIfNeeded();
+      if (_firebaseUid != null && _firebaseIdToken != null) {
+        for (final node in ["users", "pms_users", "cloud_accounts"]) {
+          try {
+            final dbUri = Uri.parse("$_firebaseDbUrl/$node/$_firebaseUid.json?auth=$_firebaseIdToken");
+            final dbReq = await client.deleteUrl(dbUri);
+            await dbReq.close().timeout(const Duration(seconds: 6));
+          } catch (_) {}
+        }
+        if ("$_firebaseApiKey".isNotEmpty) {
+          try {
+            final authUri = Uri.parse("https://identitytoolkit.googleapis.com/v1/accounts:delete?key=$_firebaseApiKey");
+            final authReq = await client.postUrl(authUri);
+            authReq.headers.set(HttpHeaders.contentTypeHeader, "application/json; charset=utf-8");
+            authReq.add(utf8.encode(jsonEncode({"idToken": _firebaseIdToken})));
+            await authReq.close().timeout(const Duration(seconds: 8));
+          } catch (_) {}
+        }
+      }
+    } catch (_) {
+    } finally {
+      client.close();
+    }
+
+    if (mounted) {
+      setState(() {
+        _signedInUserEmail = null;
+        _firebaseUid = null;
+        _firebaseIdToken = null;
+        _userSubscriptionTier = "free";
+        _dubbingMinutesRemaining = 0;
+        _selectedDubExportResolution = "720p";
+      });
+    }
+    await _saveAccountState();
+    onRefresh();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("✅ Your Studio Cloud account and associated data have been permanently deleted."),
+          duration: Duration(seconds: 5),
+        ),
+      );
+    }
+  }
+
   void _showSubscriptionPaywall() {
     showDialog(
       context: context,
@@ -9629,15 +9746,43 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                           ],
                         ),
                       ),
-                      TextButton(
-                        onPressed: () async {
-                          await _promptAccountSignIn();
-                          if (ctx.mounted) setPaywallState(() {});
-                        },
-                        child: Text(
-                          _signedInUserEmail != null ? "Account" : "Sign In",
-                          style: const TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold, fontSize: 11.5),
-                        ),
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: () async {
+                              await _promptAccountSignIn();
+                              if (ctx.mounted) setPaywallState(() {});
+                            },
+                            child: Text(
+                              _signedInUserEmail != null ? "Account" : "Sign In",
+                              style: const TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold, fontSize: 11.5),
+                            ),
+                          ),
+                          if (_signedInUserEmail != null)
+                            TextButton(
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              onPressed: () async {
+                                await _confirmAndDeleteCloudAccount(() {
+                                  if (ctx.mounted) setPaywallState(() {});
+                                });
+                              },
+                              child: const Text(
+                                "Delete Account",
+                                style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 10.5),
+                              ),
+                            ),
+                        ],
                       ),
                     ],
                   ),

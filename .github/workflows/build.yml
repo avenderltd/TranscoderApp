@@ -51,7 +51,7 @@ jobs:
           c = p.read_text()
           c = c.replace("flutter.minSdkVersion", "28")
           c = c.replace("flutter.compileSdkVersion", "37")
-          c = c.replace("flutter.targetSdkVersion", "35")
+          c = c.replace("flutter.targetSdkVersion", "36")
           c = c.replace('applicationId = "com.avenderltd.app"', 'applicationId = "com.avenderltd.transcoderapp"')
           c = c.replace('applicationId = "com.example.app"', 'applicationId = "com.avenderltd.transcoderapp"')
           signing_block = """

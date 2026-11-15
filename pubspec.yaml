@@ -1,7 +1,7 @@
 name: transcoder_app
 description: A frictionless offline AI media studio and local LLM assistant.
 publish_to: 'none'
-version: 1.0.0+2
+version: 1.0.0+3
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -14,6 +14,7 @@ dependencies:
   receive_sharing_intent: ^1.8.0
   path_provider: ^2.1.4
   file_picker: ^8.1.2
+  in_app_purchase: ^3.2.0
   http: ^1.2.2
   flutter_tts: ^4.2.0
   audioplayers: ^6.1.0

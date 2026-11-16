@@ -9224,13 +9224,50 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
     final TextEditingController emailCtrl = TextEditingController(text: _signedInUserEmail ?? "");
     final TextEditingController passCtrl = TextEditingController();
     final TextEditingController confirmPassCtrl = TextEditingController();
+    final TextEditingController verifyCodeCtrl = TextEditingController();
     bool isRegisterMode = false;
+    bool awaitingEmailVerify = false;
+    String? pendingIdToken;
+    String? pendingRefreshToken;
+    String? pendingUid;
+    String? pendingEmail;
     bool obscurePass = true;
     bool isBusy = false;
     String? errorMsg;
+    String? infoMsg;
     bool signedIn = false;
 
     final RegExp emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+
+    bool isStrongPassword(String s) {
+      if (s.length < 8) return false;
+      final bool hasLetter = RegExp(r'[A-Za-z]').hasMatch(s);
+      final bool hasDigit = RegExp(r'[0-9]').hasMatch(s);
+      if (!hasLetter || !hasDigit) return false;
+      final String lower = s.toLowerCase();
+      const List<String> banned = [
+        '12345678', '123456789', '11223344', '1122334455',
+        'password1', 'password123', 'qwerty123', 'abcdef12'
+      ];
+      for (final b in banned) {
+        if (lower.contains(b)) return false;
+      }
+      return true;
+    }
+
+    String? extractOobCode(String rawInput) {
+      final String trimmed = rawInput.trim();
+      if (trimmed.isEmpty) return null;
+      final RegExp paramMatch = RegExp(r'[?&]oobCode=([^&\s]+)');
+      final m = paramMatch.firstMatch(trimmed);
+      if (m != null && m.group(1) != null) {
+        return Uri.decodeComponent(m.group(1)!);
+      }
+      if (!trimmed.contains(' ') && trimmed.length >= 12) {
+        return trimmed;
+      }
+      return null;
+    }
 
     await showDialog(
       context: context,
@@ -9248,7 +9285,9 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  isRegisterMode ? "Create Studio Cloud Account" : "Sign In to Studio Cloud",
+                  awaitingEmailVerify
+                      ? "Verify Email Address"
+                      : (isRegisterMode ? "Create Studio Cloud Account" : "Sign In to Studio Cloud"),
                   style: const TextStyle(color: Colors.tealAccent, fontSize: 15, fontWeight: FontWeight.bold),
                 ),
               ),
@@ -9259,7 +9298,7 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (_signedInUserEmail != null)
+                if (_signedInUserEmail != null && !awaitingEmailVerify)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 10),
                     child: SizedBox(
@@ -9282,68 +9321,71 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                       ),
                     ),
                   ),
-                Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF101010),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white12),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: InkWell(
-                          onTap: () => setAuthState(() {
-                            isRegisterMode = false;
-                            errorMsg = null;
-                          }),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            decoration: BoxDecoration(
-                              color: !isRegisterMode ? Colors.tealAccent.withOpacity(0.2) : Colors.transparent,
-                              borderRadius: BorderRadius.circular(7),
-                              border: !isRegisterMode ? Border.all(color: Colors.tealAccent) : null,
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              "Sign In",
-                              style: TextStyle(
-                                color: !isRegisterMode ? Colors.tealAccent : Colors.white54,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
+                if (!awaitingEmailVerify)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF101010),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.white12),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: () => setAuthState(() {
+                              isRegisterMode = false;
+                              errorMsg = null;
+                              infoMsg = null;
+                            }),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: !isRegisterMode ? Colors.tealAccent.withOpacity(0.2) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(7),
+                                border: !isRegisterMode ? Border.all(color: Colors.tealAccent) : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                "Sign In",
+                                style: TextStyle(
+                                  color: !isRegisterMode ? Colors.tealAccent : Colors.white54,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                      Expanded(
-                        child: InkWell(
-                          onTap: () => setAuthState(() {
-                            isRegisterMode = true;
-                            errorMsg = null;
-                          }),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            decoration: BoxDecoration(
-                              color: isRegisterMode ? Colors.amberAccent.withOpacity(0.2) : Colors.transparent,
-                              borderRadius: BorderRadius.circular(7),
-                              border: isRegisterMode ? Border.all(color: Colors.amberAccent) : null,
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              "Create Account",
-                              style: TextStyle(
-                                color: isRegisterMode ? Colors.amberAccent : Colors.white54,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
+                        Expanded(
+                          child: InkWell(
+                            onTap: () => setAuthState(() {
+                              isRegisterMode = true;
+                              errorMsg = null;
+                              infoMsg = null;
+                            }),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              decoration: BoxDecoration(
+                                color: isRegisterMode ? Colors.amberAccent.withOpacity(0.2) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(7),
+                                border: isRegisterMode ? Border.all(color: Colors.amberAccent) : null,
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                "Create Account",
+                                style: TextStyle(
+                                  color: isRegisterMode ? Colors.amberAccent : Colors.white54,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
 
                 if (errorMsg != null)
                   Container(
@@ -9361,93 +9403,168 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                     ),
                   ),
 
-                TextField(
-                  controller: emailCtrl,
-                  keyboardType: TextInputType.emailAddress,
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
-                  decoration: InputDecoration(
-                    labelText: "Email Address",
-                    labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
-                    prefixIcon: const Icon(Icons.email_outlined, color: Colors.tealAccent, size: 18),
-                    filled: true,
-                    fillColor: const Color(0xFF121212),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: passCtrl,
-                  obscureText: obscurePass,
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
-                  decoration: InputDecoration(
-                    labelText: "Password (min 6 chars)",
-                    labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
-                    prefixIcon: const Icon(Icons.lock_outline, color: Colors.tealAccent, size: 18),
-                    suffixIcon: IconButton(
-                      icon: Icon(obscurePass ? Icons.visibility_off : Icons.visibility, color: Colors.white54, size: 18),
-                      onPressed: () => setAuthState(() => obscurePass = !obscurePass),
+                if (infoMsg != null)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(8),
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.tealAccent.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.tealAccent),
                     ),
-                    filled: true,
-                    fillColor: const Color(0xFF121212),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    child: Text(
+                      infoMsg!,
+                      style: const TextStyle(color: Colors.tealAccent, fontSize: 11.5, fontWeight: FontWeight.bold),
+                    ),
                   ),
-                ),
-                if (isRegisterMode) ...[
+
+                if (awaitingEmailVerify) ...[
+                  Text(
+                    "We sent a verification email to:\n$pendingEmail\n\n1. Open your email inbox (check Spam/Junk too).\n2. Paste the verification code or link from the email below (or click the link in your email), then tap Verify & Activate.",
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
                   const SizedBox(height: 10),
                   TextField(
-                    controller: confirmPassCtrl,
-                    obscureText: obscurePass,
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    controller: verifyCodeCtrl,
+                    style: const TextStyle(color: Colors.white, fontSize: 12.5),
                     decoration: InputDecoration(
-                      labelText: "Confirm Password",
-                      labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
-                      prefixIcon: const Icon(Icons.verified_user_outlined, color: Colors.amberAccent, size: 18),
+                      labelText: "Paste Verification Code or Link (Optional if clicked)",
+                      labelStyle: const TextStyle(color: Colors.amberAccent, fontSize: 11.5),
+                      hintText: "Paste code or full link from email...",
+                      hintStyle: const TextStyle(color: Colors.white38, fontSize: 11),
+                      prefixIcon: const Icon(Icons.mark_email_read_outlined, color: Colors.amberAccent, size: 18),
                       filled: true,
                       fillColor: const Color(0xFF121212),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                     ),
                   ),
-                ],
-                if (!isRegisterMode)
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: isBusy
-                          ? null
-                          : () async {
-                              final String email = emailCtrl.text.trim().toLowerCase();
-                              if (!emailRegex.hasMatch(email)) {
-                                setAuthState(() => errorMsg = "❌ Enter your registered email address above first.");
-                                return;
-                              }
-                              setAuthState(() {
-                                isBusy = true;
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      TextButton.icon(
+                        onPressed: isBusy
+                            ? null
+                            : () async {
+                                if (pendingIdToken == null) return;
+                                setAuthState(() {
+                                  isBusy = true;
+                                  errorMsg = null;
+                                });
+                                await _firebaseAuthPost("sendOobCode", {
+                                  "requestType": "VERIFY_EMAIL",
+                                  "idToken": pendingIdToken,
+                                });
+                                setAuthState(() {
+                                  isBusy = false;
+                                  infoMsg = "📧 Sent a fresh verification email to $pendingEmail!";
+                                });
+                              },
+                        icon: const Icon(Icons.refresh_rounded, color: Colors.tealAccent, size: 15),
+                        label: const Text("Resend Email", style: TextStyle(color: Colors.tealAccent, fontSize: 11)),
+                      ),
+                      TextButton(
+                        onPressed: isBusy
+                            ? null
+                            : () => setAuthState(() {
+                                awaitingEmailVerify = false;
                                 errorMsg = null;
-                              });
-                              final res = await _firebaseAuthPost("sendOobCode", {
-                                "requestType": "PASSWORD_RESET",
-                                "email": email,
-                              });
-                              setAuthState(() => isBusy = false);
-                              if (res != null && res['error'] == null) {
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text("📧 Password reset email sent to $email!")),
-                                  );
-                                }
-                              } else {
-                                final String rawErr = (res?['error']?['message'] ?? 'NETWORK_ERROR').toString();
-                                setAuthState(() => errorMsg = _formatFirebaseError(rawErr));
-                              }
-                            },
-                      child: const Text("Forgot Password? (Send Reset Email)", style: TextStyle(color: Colors.amberAccent, fontSize: 11)),
+                                infoMsg = null;
+                              }),
+                        child: const Text("Change Email", style: TextStyle(color: Colors.white54, fontSize: 11)),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  TextField(
+                    controller: emailCtrl,
+                    keyboardType: TextInputType.emailAddress,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    decoration: InputDecoration(
+                      labelText: "Email Address",
+                      labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
+                      prefixIcon: const Icon(Icons.email_outlined, color: Colors.tealAccent, size: 18),
+                      filled: true,
+                      fillColor: const Color(0xFF121212),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                     ),
                   ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: passCtrl,
+                    obscureText: obscurePass,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    decoration: InputDecoration(
+                      labelText: isRegisterMode ? "Password (min 8 chars, letters + numbers)" : "Password",
+                      labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
+                      prefixIcon: const Icon(Icons.lock_outline, color: Colors.tealAccent, size: 18),
+                      suffixIcon: IconButton(
+                        icon: Icon(obscurePass ? Icons.visibility_off : Icons.visibility, color: Colors.white54, size: 18),
+                        onPressed: () => setAuthState(() => obscurePass = !obscurePass),
+                      ),
+                      filled: true,
+                      fillColor: const Color(0xFF121212),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                  if (isRegisterMode) ...[
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: confirmPassCtrl,
+                      obscureText: obscurePass,
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      decoration: InputDecoration(
+                        labelText: "Confirm Password",
+                        labelStyle: const TextStyle(color: Colors.white60, fontSize: 12),
+                        prefixIcon: const Icon(Icons.verified_user_outlined, color: Colors.amberAccent, size: 18),
+                        filled: true,
+                        fillColor: const Color(0xFF121212),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                  ],
+                  if (!isRegisterMode)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: isBusy
+                            ? null
+                            : () async {
+                                final String email = emailCtrl.text.trim().toLowerCase();
+                                if (!emailRegex.hasMatch(email)) {
+                                  setAuthState(() => errorMsg = "❌ Enter your registered email address above first.");
+                                  return;
+                                }
+                                setAuthState(() {
+                                  isBusy = true;
+                                  errorMsg = null;
+                                });
+                                final res = await _firebaseAuthPost("sendOobCode", {
+                                  "requestType": "PASSWORD_RESET",
+                                  "email": email,
+                                });
+                                setAuthState(() => isBusy = false);
+                                if (res != null && res['error'] == null) {
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text("📧 Password reset email sent to $email!")),
+                                    );
+                                  }
+                                } else {
+                                  final String rawErr = (res?['error']?['message'] ?? 'NETWORK_ERROR').toString();
+                                  setAuthState(() => errorMsg = _formatFirebaseError(rawErr));
+                                }
+                              },
+                        child: const Text("Forgot Password? (Send Reset Email)", style: TextStyle(color: Colors.amberAccent, fontSize: 11)),
+                      ),
+                    ),
+                ],
               ],
             ),
           ),
           actions: [
-            if (_signedInUserEmail != null)
+            if (_signedInUserEmail != null && !awaitingEmailVerify)
               TextButton(
                 onPressed: () async {
                   setState(() {
@@ -9475,22 +9592,114 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
             ),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
-                backgroundColor: isRegisterMode ? Colors.amberAccent : Colors.tealAccent,
+                backgroundColor: (awaitingEmailVerify || isRegisterMode) ? Colors.amberAccent : Colors.tealAccent,
                 foregroundColor: Colors.black,
               ),
               icon: Icon(
                 isBusy
                     ? Icons.hourglass_top_rounded
-                    : (isRegisterMode ? Icons.person_add_alt_1_rounded : Icons.login_rounded),
+                    : (awaitingEmailVerify
+                        ? Icons.verified_rounded
+                        : (isRegisterMode ? Icons.person_add_alt_1_rounded : Icons.login_rounded)),
                 size: 16,
               ),
               label: Text(
-                isBusy ? "Verifying Cloud..." : (isRegisterMode ? "Create Account" : "Sign In"),
+                isBusy
+                    ? "Verifying Cloud..."
+                    : (awaitingEmailVerify
+                        ? "Verify & Activate"
+                        : (isRegisterMode ? "Create Account" : "Sign In")),
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               onPressed: isBusy
                   ? null
                   : () async {
+                      // STEP A: IF WAITING FOR EMAIL VERIFICATION CODE / LINK
+                      if (awaitingEmailVerify) {
+                        setAuthState(() {
+                          isBusy = true;
+                          errorMsg = null;
+                        });
+
+                        final String? oob = extractOobCode(verifyCodeCtrl.text);
+                        if (oob != null) {
+                          final oobRes = await _firebaseAuthPost("update", {
+                            "oobCode": oob,
+                          });
+                          if (oobRes == null || oobRes['error'] != null) {
+                            final String rawErr = (oobRes?['error']?['message'] ?? 'INVALID_OOB_CODE').toString();
+                            setAuthState(() {
+                              isBusy = false;
+                              errorMsg = "❌ Invalid or expired verification code ($rawErr). Please check your email and try again.";
+                            });
+                            return;
+                          }
+                        }
+
+                        final lookupRes = await _firebaseAuthPost("lookup", {
+                          "idToken": pendingIdToken,
+                        });
+                        bool isVerifiedNow = false;
+                        if (lookupRes != null && lookupRes['users'] is List && (lookupRes['users'] as List).isNotEmpty) {
+                          final userObj = (lookupRes['users'] as List).first;
+                          if (userObj is Map && userObj['emailVerified'] == true) {
+                            isVerifiedNow = true;
+                          }
+                        }
+
+                        if (!isVerifiedNow) {
+                          setAuthState(() {
+                            isBusy = false;
+                            errorMsg = "❌ Email ($pendingEmail) is not verified yet! Open the email we sent you, click the verification link (or paste the code/link into the box above), then tap Verify & Activate.";
+                          });
+                          return;
+                        }
+
+                        // Re-authenticate to get a fresh token with email_verified == true for Firebase Database Rules
+                        final String email = (pendingEmail ?? emailCtrl.text).trim().toLowerCase();
+                        final String pass = passCtrl.text;
+                        if (pass.isNotEmpty) {
+                          final freshSign = await _firebaseAuthPost("signInWithPassword", {
+                            "email": email,
+                            "password": pass,
+                            "returnSecureToken": true,
+                          });
+                          if (freshSign != null && freshSign['idToken'] != null) {
+                            pendingIdToken = freshSign['idToken']?.toString();
+                            pendingRefreshToken = freshSign['refreshToken']?.toString();
+                            pendingUid = freshSign['localId']?.toString();
+                          }
+                        }
+
+                        _firebaseUid = pendingUid;
+                        _firebaseIdToken = pendingIdToken;
+                        _firebaseRefreshToken = pendingRefreshToken;
+
+                        final Map<String, dynamic>? cloudAcc = await _firebaseFetchCloudQuota();
+                        final String restoredTier = (cloudAcc?['tier'] ?? 'free').toString();
+                        final int restoredMins = (cloudAcc?['mins'] is int)
+                            ? cloudAcc!['mins'] as int
+                            : (int.tryParse(cloudAcc?['mins']?.toString() ?? '0') ?? 0);
+
+                        setState(() {
+                          _signedInUserEmail = email;
+                          _userSubscriptionTier = restoredTier;
+                          _dubbingMinutesRemaining = restoredMins;
+                          _selectedDubExportResolution = restoredTier == 'pro_20'
+                              ? '4K'
+                              : (restoredTier == 'creator_8' ? '1080p' : '720p');
+                        });
+                        await _saveAccountState();
+                        signedIn = true;
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text("🎉 Email verified! Signed in as $email")),
+                          );
+                        }
+                        return;
+                      }
+
                       final String email = emailCtrl.text.trim().toLowerCase();
                       final String pass = passCtrl.text;
 
@@ -9498,21 +9707,29 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         setAuthState(() => errorMsg = "❌ Please enter a valid email address.");
                         return;
                       }
-                      if (pass.length < 6) {
-                        setAuthState(() => errorMsg = "❌ Password must be at least 6 characters.");
-                        return;
-                      }
-                      if (isRegisterMode && pass != confirmPassCtrl.text) {
-                        setAuthState(() => errorMsg = "❌ Passwords do not match.");
-                        return;
+                      if (isRegisterMode) {
+                        if (!isStrongPassword(pass)) {
+                          setAuthState(() => errorMsg = "❌ Weak password! Must be at least 8 characters and include BOTH letters and numbers (no simple sequences like 11223344 or 12345678).");
+                          return;
+                        }
+                        if (pass != confirmPassCtrl.text) {
+                          setAuthState(() => errorMsg = "❌ Passwords do not match.");
+                          return;
+                        }
+                      } else {
+                        if (pass.length < 6) {
+                          setAuthState(() => errorMsg = "❌ Password must be at least 6 characters.");
+                          return;
+                        }
                       }
 
                       setAuthState(() {
                         isBusy = true;
                         errorMsg = null;
+                        infoMsg = null;
                       });
 
-                      // 1. CREATE ACCOUNT ON FIREBASE CLOUD
+                      // 1. CREATE ACCOUNT ON FIREBASE CLOUD + SEND VERIFICATION EMAIL
                       if (isRegisterMode) {
                         final fbRes = await _firebaseAuthPost("signUp", {
                           "email": email,
@@ -9535,28 +9752,25 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                           return;
                         }
 
-                        _firebaseUid = fbRes['localId']?.toString();
-                        _firebaseIdToken = fbRes['idToken']?.toString();
-                        _firebaseRefreshToken = fbRes['refreshToken']?.toString();
+                        pendingUid = fbRes['localId']?.toString();
+                        pendingIdToken = fbRes['idToken']?.toString();
+                        pendingRefreshToken = fbRes['refreshToken']?.toString();
+                        pendingEmail = email;
 
-                        setState(() {
-                          _signedInUserEmail = email;
-                          _userSubscriptionTier = 'free';
-                          _dubbingMinutesRemaining = 0;
-                          _selectedDubExportResolution = '720p';
+                        await _firebaseAuthPost("sendOobCode", {
+                          "requestType": "VERIFY_EMAIL",
+                          "idToken": pendingIdToken,
                         });
-                        await _saveAccountState();
-                        signedIn = true;
-                        if (ctx.mounted) Navigator.pop(ctx);
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text("🎉 Cloud account created & signed in as $email")),
-                          );
-                        }
+
+                        setAuthState(() {
+                          isBusy = false;
+                          awaitingEmailVerify = true;
+                          infoMsg = "📧 Verification email sent to $email! Check your inbox to verify.";
+                        });
                         return;
                       }
 
-                      // 2. SIGN IN VIA FIREBASE CLOUD
+                      // 2. SIGN IN VIA FIREBASE CLOUD + REQUIRE VERIFIED EMAIL
                       final fbRes = await _firebaseAuthPost("signInWithPassword", {
                         "email": email,
                         "password": pass,
@@ -9578,9 +9792,43 @@ class _TranscoderScreenState extends State<TranscoderScreen> {
                         return;
                       }
 
-                      _firebaseUid = fbRes['localId']?.toString();
-                      _firebaseIdToken = fbRes['idToken']?.toString();
-                      _firebaseRefreshToken = fbRes['refreshToken']?.toString();
+                      final String? loginIdToken = fbRes['idToken']?.toString();
+                      final String? loginRefresh = fbRes['refreshToken']?.toString();
+                      final String? loginUid = fbRes['localId']?.toString();
+
+                      final bool isPlayStoreReviewer = email == "playstore@googlereveiw.com" || email == "playstore@googlereview.com";
+                      if (!isPlayStoreReviewer) {
+                        final lookupRes = await _firebaseAuthPost("lookup", {
+                          "idToken": loginIdToken,
+                        });
+                        bool emailVerified = false;
+                        if (lookupRes != null && lookupRes['users'] is List && (lookupRes['users'] as List).isNotEmpty) {
+                          final u = (lookupRes['users'] as List).first;
+                          if (u is Map && u['emailVerified'] == true) {
+                            emailVerified = true;
+                          }
+                        }
+                        if (!emailVerified) {
+                          pendingUid = loginUid;
+                          pendingIdToken = loginIdToken;
+                          pendingRefreshToken = loginRefresh;
+                          pendingEmail = email;
+                          await _firebaseAuthPost("sendOobCode", {
+                            "requestType": "VERIFY_EMAIL",
+                            "idToken": loginIdToken,
+                          });
+                          setAuthState(() {
+                            isBusy = false;
+                            awaitingEmailVerify = true;
+                            infoMsg = "📧 Your email ($email) is not verified yet. We just sent a verification email—verify it to finish signing in.";
+                          });
+                          return;
+                        }
+                      }
+
+                      _firebaseUid = loginUid;
+                      _firebaseIdToken = loginIdToken;
+                      _firebaseRefreshToken = loginRefresh;
 
                       final Map<String, dynamic>? cloudAcc = await _firebaseFetchCloudQuota();
                       final String restoredTier = (cloudAcc?['tier'] ?? 'free').toString();

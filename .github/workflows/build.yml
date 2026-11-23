@@ -45,8 +45,26 @@ jobs:
           cp main.dart app/lib/main.dart
           cp AndroidManifest.xml app/android/app/src/main/AndroidManifest.xml
           cp upload-keystore.jks app/android/app/upload-keystore.jks
+          python3 -m pip install --quiet --break-system-packages pillow || pip install --quiet pillow
           python3 - << 'PYEOF'
           import pathlib
+          import pathlib, shutil
+          from PIL import Image
+          icon_src = pathlib.Path("app_icon.jpg")
+          if icon_src.exists():
+              res_dir = pathlib.Path("app/android/app/src/main/res")
+              anydpi = res_dir / "mipmap-anydpi-v26"
+              if anydpi.exists():
+                  shutil.rmtree(anydpi)
+              img = Image.open(icon_src).convert("RGBA")
+              for folder, px in [("mipmap-mdpi", 48), ("mipmap-hdpi", 72), ("mipmap-xhdpi", 96), ("mipmap-xxhdpi", 144), ("mipmap-xxxhdpi", 192)]:
+                  d = res_dir / folder
+                  if d.exists():
+                      resized = img.resize((px, px), Image.Resampling.LANCZOS)
+                      resized.save(d / "ic_launcher.png", "PNG")
+                      if (d / "ic_launcher_round.png").exists():
+                          resized.save(d / "ic_launcher_round.png", "PNG")
+              print("Custom launcher icons generated successfully!")
           p = pathlib.Path("app/android/app/build.gradle.kts")
           c = p.read_text()
           c = c.replace("flutter.minSdkVersion", "28")
